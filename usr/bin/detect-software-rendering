@@ -79,10 +79,13 @@ probe_renderer() {
    ## somehow absent, running eglinfo unbounded. 'env' unsets DISPLAY /
    ## WAYLAND_DISPLAY so eglinfo cannot block on a display-server connect; the
    ## renderer still comes from the surfaceless/GBM/device platforms.
+   ## --kill-after=5: a plain 'timeout 5' only sends SIGTERM, which a wedged
+   ## eglinfo stuck in a syscall can ignore and then run forever; the follow-up
+   ## SIGKILL 5s later guarantees it dies.
    if has timeout ; then
-      timeout_maybe="timeout 5"
+      timeout_maybe="timeout --kill-after=5 5"
    fi
-   ## Deliberate word-splitting: 'timeout 5' -> two words, or nothing.
+   ## Deliberate word-splitting: 'timeout --kill-after=5 5' -> three words, or nothing.
    # shellcheck disable=SC2086
    eglinfo_output="$(${timeout_maybe} env --unset=DISPLAY --unset=WAYLAND_DISPLAY eglinfo -B 2>/dev/null)" || true
    renderer_line="$(printf '%s\n' "${eglinfo_output}" | grep --fixed-strings -- "OpenGL core profile renderer:")" || true
