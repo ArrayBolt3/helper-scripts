@@ -134,9 +134,15 @@ probe_renderer() {
 detect_software_rendering() {
    local runtime_dir cache_base result guess
 
+   ## Do not cache when LIBGL_ALWAYS_SOFTWARE is set: it is a per-environment
+   ## override and the marker name encodes only the result, so a forced-software
+   ## marker would wrongly be returned to a later shell that does not set it (and
+   ## the reverse). The LIBGL short-circuit is instant, so skipping the cache here
+   ## costs nothing.
    runtime_dir="${XDG_RUNTIME_DIR:-/run/user/${UID}}"
    cache_base=""
-   if [ -d "${runtime_dir}" ] && [ -w "${runtime_dir}" ]; then
+   if [ -z "${LIBGL_ALWAYS_SOFTWARE:-}" ] \
+      && [ -d "${runtime_dir}" ] && [ -w "${runtime_dir}" ]; then
       cache_base="${runtime_dir}/detect-software-rendering"
    fi
 
