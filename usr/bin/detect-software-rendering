@@ -13,6 +13,23 @@ source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/check_runtime.bsh
 # shellcheck source=../libexec/helper-scripts/has.sh
 source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/has.sh
 
+## True if a DRM node ('/dev/dri/renderD*', '/dev/dri/card*') or the NVIDIA
+## control node ('/dev/nvidiactl') is present. Both paths are overridable
+## (DETECT_SOFTWARE_RENDERING_DRI_DIR, DETECT_SOFTWARE_RENDERING_NVIDIA_CTL) for
+## tests. Pure and strict-mode free.
+gpu_node_present() {
+   local dri_dir nvidia_ctl node
+
+   dri_dir="${DETECT_SOFTWARE_RENDERING_DRI_DIR:-/dev/dri}"
+   nvidia_ctl="${DETECT_SOFTWARE_RENDERING_NVIDIA_CTL:-/dev/nvidiactl}"
+   for node in "${dri_dir}"/renderD* "${dri_dir}"/card* ; do
+      if [ -e "${node}" ]; then
+         return 0
+      fi
+   done
+   [ -e "${nvidia_ctl}" ]
+}
+
 ## Classify the OpenGL renderer. Best-effort only. Prints exactly one word:
 ## accelerated, software or unknown; anything not a clear match is 'unknown',
 ## never assumed. Pure and strict-mode free (see detect_software_rendering).
@@ -32,7 +49,7 @@ source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/has.sh
 ## still read via the surfaceless/GBM/device platforms), and it is bounded with
 ## 'timeout' as a backstop.
 probe_renderer() {
-   local dri_dir nvidia_ctl dri_present node eglinfo_output renderer_line timeout_maybe
+   local eglinfo_output renderer_line timeout_maybe
 
    ## LIBGL_ALWAYS_SOFTWARE forces the Mesa stack to llvmpipe -> software.
    case "${LIBGL_ALWAYS_SOFTWARE:-}" in
@@ -42,19 +59,8 @@ probe_renderer() {
          ;;
    esac
 
-   ## No DRM node AND no NVIDIA node -> no hardware driver -> software. Both paths
-   ## are overridable (DETECT_SOFTWARE_RENDERING_DRI_DIR,
-   ## DETECT_SOFTWARE_RENDERING_NVIDIA_CTL) for tests.
-   dri_dir="${DETECT_SOFTWARE_RENDERING_DRI_DIR:-/dev/dri}"
-   nvidia_ctl="${DETECT_SOFTWARE_RENDERING_NVIDIA_CTL:-/dev/nvidiactl}"
-   dri_present=""
-   for node in "${dri_dir}"/renderD* "${dri_dir}"/card* ; do
-      if [ -e "${node}" ]; then
-         dri_present="yes"
-         break
-      fi
-   done
-   if [ -z "${dri_present}" ] && [ ! -e "${nvidia_ctl}" ]; then
+   ## No GPU node -> no hardware driver -> software.
+   if ! gpu_node_present ; then
       printf '%s\n' "software"
       return 0
    fi
@@ -116,10 +122,10 @@ probe_renderer() {
 ##   accelerated   1   a known hardware vendor renderer
 ##   unknown       2   eglinfo absent / empty / timed out / unrecognized
 ##
-## The renderer is a per-boot property, and probe_renderer's eglinfo fall-through
-## can cost the full 'timeout' (only reached when a DRM node is present), so the
-## result is cached in the per-user, per-boot runtime dir (a tmpfs): only the
-## first shell after boot probes, the rest read the cache. The runtime dir is
+## probe_renderer's eglinfo fall-through can cost the full 'timeout' (only reached
+## when a GPU node is present), so THAT verdict is cached in the per-user, per-boot
+## runtime dir (a tmpfs): the first shell after boot probes, the rest read the
+## cache; the cheap no-node short-circuit is not cached (see below). The runtime dir is
 ## XDG_RUNTIME_DIR, falling back to the canonical '/run/user/<uid>' that logind
 ## creates when the env var is not propagated -- session-managed but NOT
 ## GUI-specific (logind sets it for console and ssh sessions too), cleared on
@@ -159,9 +165,13 @@ detect_software_rendering() {
 
    if [ -z "${result}" ]; then
       result="$(probe_renderer)"
-      if [ -n "${cache_base}" ]; then
-         ## Encode the result in the marker-file NAME; best-effort, a read-only or
-         ## missing runtime dir must not fail a login.
+      ## Cache ONLY a verdict that required the eglinfo probe (a GPU node was
+      ## present). The no-node short-circuit 'software' is free to recompute and
+      ## would go stale if a GPU node appears later this boot: NVIDIA nodes are
+      ## created on demand (first GL client), and eGPU/DisplayLink/VM hot-add can
+      ## add a '/dev/dri' node. Encode the result in the marker-file NAME;
+      ## best-effort, a read-only or missing runtime dir must not fail a login.
+      if [ -n "${cache_base}" ] && gpu_node_present ; then
          touch -- "${cache_base}.${result}" 2>/dev/null || true
       fi
    fi
