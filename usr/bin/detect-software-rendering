@@ -1,12 +1,10 @@
 #!/bin/bash -e
 
-## style-ok: no-strict -- dual-mode: strict is set only inside 'if was_executed' (a direct run, so it cannot leak into a shell that sources this file), hence not at column 0.
 ## Copyright (C) 2020 - 2025 ENCRYPTED SUPPORT LLC <adrelanos@whonix.org>
 ## See the file COPYING for copying conditions.
 
-## 'errexit' on the shebang (honoured only on a direct run, ignored when this
-## file is sourced) so a failed 'source' below - e.g. helper-scripts missing -
-## aborts immediately, before the guarded strict-mode block further down.
+## errexit on the shebang (direct run only; ignored when sourced) so a failed
+## 'source' below aborts before the guarded strict-mode block further down.
 
 ## provides was_executed
 # shellcheck source=../libexec/helper-scripts/check_runtime.bsh
@@ -15,9 +13,9 @@ source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/check_runtime.bsh
 # shellcheck source=../libexec/helper-scripts/has.sh
 source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/has.sh
 
-## Dual-mode: this file is also SOURCED (unit tests, or reuse of the
-## detect_software_rendering function), so strict mode is enabled on a DIRECT
-## run only and cannot leak into the sourcing shell.
+## Dual-mode: this file is also SOURCED (unit tests, or reuse of the function),
+## so strict mode is enabled on a DIRECT run only and cannot leak into the
+## sourcing shell.
 if was_executed "${BASH_SOURCE[0]}"; then
    set -o errexit
    set -o nounset
@@ -27,7 +25,7 @@ if was_executed "${BASH_SOURCE[0]}"; then
    shopt -s shift_verbose
 fi
 
-## Best-effort GUESS of the OpenGL renderer type, via 'eglinfo'. This is never
+## Best-effort GUESS of the OpenGL renderer type, via 'eglinfo'. Never
 ## authoritative: 'eglinfo' can be absent, report nothing, or - on headless VMs
 ## and Qubes AppVMs with no accelerated GL (no '/dev/dri') - HANG forever on
 ## EGL/DRM probing. It is therefore always bounded with 'timeout', and anything
@@ -37,9 +35,6 @@ fi
 ##   software      0   llvmpipe (mesa CPU renderer)
 ##   accelerated   1   a known hardware vendor renderer
 ##   unknown       2   eglinfo absent / empty / timed out / unrecognized
-##
-## Primary consumer: the 'softwarecontext' QMLSCENE_DEVICE fallback in
-## vm-config-dist's /etc/profile.d/20_software_rendering_in_vms.sh.
 detect_software_rendering() {
    local eglinfo_output renderer_line timeout_maybe
 
@@ -98,5 +93,5 @@ detect_software_rendering() {
 
 ## Only auto-run when executed, not when sourced (unit tests source it).
 if was_executed "${BASH_SOURCE[0]}"; then
-   detect_software_rendering "$@" || exit "${?}"
+   detect_software_rendering "$@"
 fi
