@@ -122,60 +122,20 @@ probe_renderer() {
 ##   accelerated   1   a known hardware vendor renderer
 ##   unknown       2   eglinfo absent / empty / timed out / unrecognized
 ##
-## probe_renderer's eglinfo fall-through can cost the full 'timeout' (only reached
-## when a GPU node is present), so THAT verdict is cached in the per-user, per-boot
-## runtime dir (a tmpfs): the first shell after boot probes, the rest read the
-## cache; the cheap no-node short-circuit is not cached (see below). The runtime dir is
-## XDG_RUNTIME_DIR, falling back to the canonical '/run/user/<uid>' that logind
-## creates when the env var is not propagated -- session-managed but NOT
-## GUI-specific (logind sets it for console and ssh sessions too), cleared on
-## reboot (correct: the renderer is a per-boot property). The result is encoded
-## in the marker-file NAME ('detect-software-rendering.<result>'), so a cache hit
-## is a filename test with no file content to read back. Best-effort -- with no
-## writable runtime dir it simply probes every time.
+## Deliberately NOT cached: a GPU node can appear (NVIDIA nodes are created on
+## demand, eGPU/DisplayLink/VM hot-add) and disappear (unplug, VM device_del)
+## within a boot, so any per-boot snapshot goes stale in one direction or the
+## other. Re-evaluating every call is cheap: the no-GPU case short-circuits
+## instantly, and the eglinfo path is fast (its hanging X11/Wayland connect is
+## avoided -- see probe_renderer).
 ##
 ## Pure and strict-mode free, so a caller (unit test, or another script reusing
 ## the guess) can source this file and call this function without inheriting
 ## strict-mode. main() owns strict-mode; this function does not.
 detect_software_rendering() {
-   local runtime_dir cache_base result guess
+   local result
 
-   ## Do not cache when LIBGL_ALWAYS_SOFTWARE is set: it is a per-environment
-   ## override and the marker name encodes only the result, so a forced-software
-   ## marker would wrongly be returned to a later shell that does not set it (and
-   ## the reverse). The LIBGL short-circuit is instant, so skipping the cache here
-   ## costs nothing.
-   runtime_dir="${XDG_RUNTIME_DIR:-/run/user/${UID}}"
-   cache_base=""
-   if [ -z "${LIBGL_ALWAYS_SOFTWARE:-}" ] \
-      && [ -d "${runtime_dir}" ] && [ -w "${runtime_dir}" ]; then
-      cache_base="${runtime_dir}/detect-software-rendering"
-   fi
-
-   ## Cache HIT is a filename test: the '.<result>' marker present is the answer.
-   result=""
-   if [ -n "${cache_base}" ]; then
-      for guess in software accelerated unknown; do
-         if [ -e "${cache_base}.${guess}" ]; then
-            result="${guess}"
-            break
-         fi
-      done
-   fi
-
-   if [ -z "${result}" ]; then
-      result="$(probe_renderer)"
-      ## Cache ONLY a verdict that required the eglinfo probe (a GPU node was
-      ## present). The no-node short-circuit 'software' is free to recompute and
-      ## would go stale if a GPU node appears later this boot: NVIDIA nodes are
-      ## created on demand (first GL client), and eGPU/DisplayLink/VM hot-add can
-      ## add a '/dev/dri' node. Encode the result in the marker-file NAME;
-      ## best-effort, a read-only or missing runtime dir must not fail a login.
-      if [ -n "${cache_base}" ] && gpu_node_present ; then
-         touch -- "${cache_base}.${result}" 2>/dev/null || true
-      fi
-   fi
-
+   result="$(probe_renderer)"
    printf '%s\n' "${result}"
    case "${result}" in
       software)
