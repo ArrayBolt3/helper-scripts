@@ -1,6 +1,6 @@
 #!/bin/bash -e
 
-## Copyright (C) 2020 - 2025 ENCRYPTED SUPPORT LLC <adrelanos@whonix.org>
+## Copyright (C) 2020 - 2026 ENCRYPTED SUPPORT LLC <adrelanos@whonix.org>
 ## See the file COPYING for copying conditions.
 
 ## errexit on the shebang (direct run only; ignored when sourced) so a failed
