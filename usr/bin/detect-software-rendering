@@ -13,21 +13,13 @@ source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/check_runtime.bsh
 # shellcheck source=../libexec/helper-scripts/has.sh
 source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/has.sh
 
-## Best-effort GUESS of the OpenGL renderer type, via 'eglinfo'. Never
-## authoritative: 'eglinfo' can be absent, report nothing, or - on headless VMs
-## and Qubes AppVMs with no accelerated GL (no '/dev/dri') - HANG forever on
-## EGL/DRM probing. It is therefore always bounded with 'timeout', and anything
-## that is not a clear match is reported as 'unknown' rather than assumed.
-##
-## Prints one of, and returns:
-##   software      0   llvmpipe (mesa CPU renderer)
-##   accelerated   1   a known hardware vendor renderer
-##   unknown       2   eglinfo absent / empty / timed out / unrecognized
-##
-## Pure and strict-mode free, so a caller (unit test, or another script reusing
-## the guess) can source this file and call this function without inheriting
-## strict-mode. main() owns strict-mode; this function does not.
-detect_software_rendering() {
+## Probe 'eglinfo' and classify the OpenGL renderer. Best-effort only: 'eglinfo'
+## can be absent, report nothing, or - on headless VMs and Qubes AppVMs with no
+## accelerated GL (no '/dev/dri') - HANG forever on EGL/DRM probing, so it is
+## always bounded with 'timeout'. Prints exactly one word: accelerated, software
+## or unknown. Anything not a clear match is 'unknown', never assumed.
+## Pure and strict-mode free (see detect_software_rendering).
+probe_renderer() {
    local eglinfo_output renderer_line timeout_maybe
 
    eglinfo_output=""
@@ -69,18 +61,64 @@ detect_software_rendering() {
       -e "D3D12" \
       <<< "${renderer_line}" ; then
       printf '%s\n' "accelerated"
-      return 1
+      return 0
    fi
 
-   ## Mesa CPU renderer -> software.
    if grep --quiet -- "llvmpipe" <<< "${renderer_line}" ; then
       printf '%s\n' "software"
       return 0
    fi
 
-   ## No eglinfo, empty output, a timeout, or an unrecognized renderer.
    printf '%s\n' "unknown"
-   return 2
+}
+
+## Best-effort GUESS of the renderer type. Prints one of, and returns:
+##   software      0   llvmpipe (mesa CPU renderer)
+##   accelerated   1   a known hardware vendor renderer
+##   unknown       2   eglinfo absent / empty / timed out / unrecognized
+##
+## The renderer is a per-boot property, and probe_renderer can cost the full
+## 'timeout' on a headless VM, so the result is cached in XDG_RUNTIME_DIR (a
+## per-boot tmpfs): only the first shell after boot probes, the rest read the
+## cache. Caching is best-effort -- when XDG_RUNTIME_DIR is unset or unwritable
+## it simply probes every time.
+##
+## Pure and strict-mode free, so a caller (unit test, or another script reusing
+## the guess) can source this file and call this function without inheriting
+## strict-mode. main() owns strict-mode; this function does not.
+detect_software_rendering() {
+   local cache_file result
+
+   cache_file=""
+   if [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -d "${XDG_RUNTIME_DIR}" ]; then
+      cache_file="${XDG_RUNTIME_DIR}/detect-software-rendering.cache"
+   fi
+
+   result=""
+   if [ -n "${cache_file}" ] && [ -r "${cache_file}" ]; then
+      result="$(cat -- "${cache_file}")" || result=""
+   fi
+
+   if [ -z "${result}" ]; then
+      result="$(probe_renderer)"
+      if [ -n "${cache_file}" ]; then
+         ## Best-effort; a read-only or missing runtime dir must not fail a login.
+         printf '%s\n' "${result}" >"${cache_file}" 2>/dev/null || true
+      fi
+   fi
+
+   printf '%s\n' "${result}"
+   case "${result}" in
+      software)
+         return 0
+         ;;
+      accelerated)
+         return 1
+         ;;
+      *)
+         return 2
+         ;;
+   esac
 }
 
 main() {
