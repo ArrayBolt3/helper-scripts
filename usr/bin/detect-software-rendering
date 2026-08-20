@@ -67,7 +67,7 @@ probe_renderer() {
       ## Deliberate word-splitting: 'timeout 5' -> two words, or nothing.
       # shellcheck disable=SC2086
       eglinfo_output="$(${timeout_maybe} eglinfo -B 2>/dev/null)" || true
-      renderer_line="$(printf '%s\n' "${eglinfo_output}" | grep -- "OpenGL core profile renderer:")" || true
+      renderer_line="$(printf '%s\n' "${eglinfo_output}" | grep --fixed-strings -- "OpenGL core profile renderer:")" || true
    fi
 
    ## Known hardware vendor renderer -> accelerated. Here-string, not a pipe, so
@@ -96,7 +96,7 @@ probe_renderer() {
       return 0
    fi
 
-   if grep --quiet -- "llvmpipe" <<< "${renderer_line}" ; then
+   if grep --quiet --fixed-strings -- "llvmpipe" <<< "${renderer_line}" ; then
       printf '%s\n' "software"
       return 0
    fi
@@ -112,30 +112,39 @@ probe_renderer() {
 ## The renderer is a per-boot property, and probe_renderer's eglinfo fall-through
 ## can cost the full 'timeout' (only reached when a DRM node is present), so the
 ## result is cached in XDG_RUNTIME_DIR (a per-boot tmpfs): only the first shell
-## after boot probes, the rest read the cache. Caching is best-effort -- when
-## XDG_RUNTIME_DIR is unset or unwritable it simply probes every time.
+## after boot probes, the rest read the cache. The result is encoded in the
+## marker-file NAME ('detect-software-rendering.<result>'), so a cache hit is a
+## filename test with no file content to read back. Caching is best-effort --
+## when XDG_RUNTIME_DIR is unset or unwritable it simply probes every time.
 ##
 ## Pure and strict-mode free, so a caller (unit test, or another script reusing
 ## the guess) can source this file and call this function without inheriting
 ## strict-mode. main() owns strict-mode; this function does not.
 detect_software_rendering() {
-   local cache_file result
+   local cache_base result guess
 
-   cache_file=""
+   cache_base=""
    if [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -d "${XDG_RUNTIME_DIR}" ]; then
-      cache_file="${XDG_RUNTIME_DIR}/detect-software-rendering.cache"
+      cache_base="${XDG_RUNTIME_DIR}/detect-software-rendering"
    fi
 
+   ## Cache HIT is a filename test: the '.<result>' marker present is the answer.
    result=""
-   if [ -n "${cache_file}" ] && [ -r "${cache_file}" ]; then
-      result="$(cat -- "${cache_file}")" || result=""
+   if [ -n "${cache_base}" ]; then
+      for guess in software accelerated unknown; do
+         if [ -e "${cache_base}.${guess}" ]; then
+            result="${guess}"
+            break
+         fi
+      done
    fi
 
    if [ -z "${result}" ]; then
       result="$(probe_renderer)"
-      if [ -n "${cache_file}" ]; then
-         ## Best-effort; a read-only or missing runtime dir must not fail a login.
-         printf '%s\n' "${result}" >"${cache_file}" 2>/dev/null || true
+      if [ -n "${cache_base}" ]; then
+         ## Encode the result in the marker-file NAME; best-effort, a read-only or
+         ## missing runtime dir must not fail a login.
+         touch -- "${cache_base}.${result}" 2>/dev/null || true
       fi
    fi
 
