@@ -20,16 +20,19 @@ source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/has.sh
 ## Two zero-cost, hang-free short-circuits run before 'eglinfo', so the common
 ## no-GPU VM case never spawns a GL probe:
 ##  - LIBGL_ALWAYS_SOFTWARE truthy: the Mesa stack is forced to llvmpipe.
-##  - no DRM node ('/dev/dri/renderD*', '/dev/dri/card*'): a Mesa stack has no
-##    hardware driver. (A proprietary NVIDIA driver without a DRM node is the
-##    rare miss; a VM normally has no GPU at all.)
-## Only when a DRM node is present is eglinfo asked for the actual renderer.
+##  - no DRM node ('/dev/dri/renderD*', '/dev/dri/card*') AND no NVIDIA node
+##    ('/dev/nvidiactl'): no hardware driver at all. Proprietary NVIDIA (classic
+##    GLX) renders via '/dev/nvidia*', not a DRM node, so its presence blocks
+##    this short-circuit and falls through to the probe.
+## Only when a GPU node is present is eglinfo asked for the actual renderer.
 ## eglinfo's GBM/Wayland/device probes FAIL FAST without a DRM node; the one path
-## that can block is the X11 platform connecting to $DISPLAY when the X server
-## accepts but never replies (a half-started server during login) -- so the
-## eglinfo call is still bounded with 'timeout'.
+## that can block is the X11/Wayland platform connecting to $DISPLAY /
+## $WAYLAND_DISPLAY when the server accepts but never replies (a half-started
+## server during login), so those are unset for the eglinfo call (the renderer is
+## still read via the surfaceless/GBM/device platforms), and it is bounded with
+## 'timeout' as a backstop.
 probe_renderer() {
-   local dri_dir dri_present node eglinfo_output renderer_line timeout_maybe
+   local dri_dir nvidia_ctl dri_present node eglinfo_output renderer_line timeout_maybe
 
    ## LIBGL_ALWAYS_SOFTWARE forces the Mesa stack to llvmpipe -> software.
    case "${LIBGL_ALWAYS_SOFTWARE:-}" in
@@ -39,9 +42,11 @@ probe_renderer() {
          ;;
    esac
 
-   ## No DRM render/card node -> no hardware Mesa driver -> software. The node
-   ## directory is overridable (DETECT_SOFTWARE_RENDERING_DRI_DIR) for tests.
+   ## No DRM node AND no NVIDIA node -> no hardware driver -> software. Both paths
+   ## are overridable (DETECT_SOFTWARE_RENDERING_DRI_DIR,
+   ## DETECT_SOFTWARE_RENDERING_NVIDIA_CTL) for tests.
    dri_dir="${DETECT_SOFTWARE_RENDERING_DRI_DIR:-/dev/dri}"
+   nvidia_ctl="${DETECT_SOFTWARE_RENDERING_NVIDIA_CTL:-/dev/nvidiactl}"
    dri_present=""
    for node in "${dri_dir}"/renderD* "${dri_dir}"/card* ; do
       if [ -e "${node}" ]; then
@@ -49,7 +54,7 @@ probe_renderer() {
          break
       fi
    done
-   if [ -z "${dri_present}" ]; then
+   if [ -z "${dri_present}" ] && [ ! -e "${nvidia_ctl}" ]; then
       printf '%s\n' "software"
       return 0
    fi
@@ -64,9 +69,11 @@ probe_renderer() {
       if has timeout ; then
          timeout_maybe="timeout 5"
       fi
-      ## Deliberate word-splitting: 'timeout 5' -> two words, or nothing.
+      ## Deliberate word-splitting: 'timeout 5' -> two words, or nothing. 'env'
+      ## unsets DISPLAY/WAYLAND_DISPLAY so eglinfo cannot block on a display-server
+      ## connect; the renderer still comes from the surfaceless/GBM/device paths.
       # shellcheck disable=SC2086
-      eglinfo_output="$(${timeout_maybe} eglinfo -B 2>/dev/null)" || true
+      eglinfo_output="$(${timeout_maybe} env --unset=DISPLAY --unset=WAYLAND_DISPLAY eglinfo -B 2>/dev/null)" || true
       renderer_line="$(printf '%s\n' "${eglinfo_output}" | grep --fixed-strings -- "OpenGL core profile renderer:")" || true
    fi
 
