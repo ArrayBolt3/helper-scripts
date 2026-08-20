@@ -4,7 +4,7 @@
 ## See the file COPYING for copying conditions.
 
 ## errexit on the shebang (direct run only; ignored when sourced) so a failed
-## 'source' below aborts before the guarded strict-mode block further down.
+## 'source' below aborts before main() sets the full strict block.
 
 ## provides was_executed
 # shellcheck source=../libexec/helper-scripts/check_runtime.bsh
@@ -12,18 +12,6 @@ source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/check_runtime.bsh
 ## provides has
 # shellcheck source=../libexec/helper-scripts/has.sh
 source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/has.sh
-
-## Dual-mode: this file is also SOURCED (unit tests, or reuse of the function),
-## so strict mode is enabled on a DIRECT run only and cannot leak into the
-## sourcing shell.
-if was_executed "${BASH_SOURCE[0]}"; then
-   set -o errexit
-   set -o nounset
-   set -o pipefail
-   set -o errtrace
-   shopt -s inherit_errexit
-   shopt -s shift_verbose
-fi
 
 ## Best-effort GUESS of the OpenGL renderer type, via 'eglinfo'. Never
 ## authoritative: 'eglinfo' can be absent, report nothing, or - on headless VMs
@@ -35,6 +23,10 @@ fi
 ##   software      0   llvmpipe (mesa CPU renderer)
 ##   accelerated   1   a known hardware vendor renderer
 ##   unknown       2   eglinfo absent / empty / timed out / unrecognized
+##
+## Pure and strict-mode free, so a caller (unit test, or another script reusing
+## the guess) can source this file and call this function without inheriting
+## strict-mode. main() owns strict-mode; this function does not.
 detect_software_rendering() {
    local eglinfo_output renderer_line timeout_maybe
 
@@ -91,7 +83,18 @@ detect_software_rendering() {
    return 2
 }
 
+main() {
+   set -o errexit
+   set -o nounset
+   set -o pipefail
+   set -o errtrace
+   shopt -s inherit_errexit
+   shopt -s shift_verbose
+
+   detect_software_rendering "$@"
+}
+
 ## Only auto-run when executed, not when sourced (unit tests source it).
 if was_executed "${BASH_SOURCE[0]}"; then
-   detect_software_rendering "$@"
+   main "$@"
 fi
