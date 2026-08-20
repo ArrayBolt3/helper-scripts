@@ -1,0 +1,77 @@
+#!/bin/bash
+
+## Copyright (C) 2020 - 2025 ENCRYPTED SUPPORT LLC <adrelanos@whonix.org>
+## See the file COPYING for copying conditions.
+
+set -o errexit
+set -o nounset
+set -o pipefail
+set -o errtrace
+shopt -s inherit_errexit
+shopt -s shift_verbose
+
+# shellcheck source=../libexec/helper-scripts/has.sh
+source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/has.sh
+
+## Best-effort GUESS of the OpenGL renderer type, via 'eglinfo'. This is never
+## authoritative: 'eglinfo' can be absent, report nothing, or - on headless VMs
+## and Qubes AppVMs with no accelerated GL (no '/dev/dri') - HANG forever on
+## EGL/DRM probing. It is therefore always bounded with 'timeout', and anything
+## that is not a clear match is reported as 'unknown' rather than assumed.
+##
+## Prints one of, and exits:
+##   software      exit 0   llvmpipe (mesa CPU renderer)
+##   accelerated   exit 1   a known hardware vendor renderer
+##   unknown       exit 2   eglinfo absent / empty / timed out / unrecognized
+##
+## Primary consumer: the 'softwarecontext' QMLSCENE_DEVICE fallback in
+## vm-config-dist's /etc/profile.d/20_software_rendering_in_vms.sh.
+
+eglinfo_output=""
+renderer_line=""
+
+if has eglinfo ; then
+   ## 'timeout' is from coreutils (Essential: yes); guard in case it is absent.
+   if has timeout ; then
+      eglinfo_output="$(timeout 5 eglinfo -B 2>/dev/null)" || true
+   else
+      eglinfo_output="$(eglinfo -B 2>/dev/null)" || true
+   fi
+   renderer_line="$(printf '%s\n' "${eglinfo_output}" | grep -- "OpenGL core profile renderer:")" || true
+fi
+
+## Known hardware vendor renderer -> accelerated. Here-string, not a pipe, so a
+## quiet grep cannot SIGPIPE the producer into a pipefail failure (R-161).
+if grep --quiet --fixed-strings \
+   -e "AMD" \
+   -e "NVIDIA" \
+   -e "Intel" \
+   -e "Apple" \
+   -e "Adreno" \
+   -e "Radeon" \
+   -e "ATI" \
+   -e "Mali" \
+   -e "Panfrost" \
+   -e "V3D" \
+   -e "VC4" \
+   -e "PowerVR" \
+   -e "Vivante" \
+   -e "etnaviv" \
+   -e "Lima" \
+   -e "virgl" \
+   -e "SVGA3D" \
+   -e "D3D12" \
+   <<< "${renderer_line}" ; then
+   printf '%s\n' "accelerated"
+   exit 1
+fi
+
+## Mesa CPU renderer -> software.
+if grep --quiet -- "llvmpipe" <<< "${renderer_line}" ; then
+   printf '%s\n' "software"
+   exit 0
+fi
+
+## No eglinfo, empty output, a timeout, or an unrecognized renderer.
+printf '%s\n' "unknown"
+exit 2
