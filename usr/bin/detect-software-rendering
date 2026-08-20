@@ -118,21 +118,26 @@ probe_renderer() {
 ##
 ## The renderer is a per-boot property, and probe_renderer's eglinfo fall-through
 ## can cost the full 'timeout' (only reached when a DRM node is present), so the
-## result is cached in XDG_RUNTIME_DIR (a per-boot tmpfs): only the first shell
-## after boot probes, the rest read the cache. The result is encoded in the
-## marker-file NAME ('detect-software-rendering.<result>'), so a cache hit is a
-## filename test with no file content to read back. Caching is best-effort --
-## when XDG_RUNTIME_DIR is unset or unwritable it simply probes every time.
+## result is cached in the per-user, per-boot runtime dir (a tmpfs): only the
+## first shell after boot probes, the rest read the cache. The runtime dir is
+## XDG_RUNTIME_DIR, falling back to the canonical '/run/user/<uid>' that logind
+## creates when the env var is not propagated -- session-managed but NOT
+## GUI-specific (logind sets it for console and ssh sessions too), cleared on
+## reboot (correct: the renderer is a per-boot property). The result is encoded
+## in the marker-file NAME ('detect-software-rendering.<result>'), so a cache hit
+## is a filename test with no file content to read back. Best-effort -- with no
+## writable runtime dir it simply probes every time.
 ##
 ## Pure and strict-mode free, so a caller (unit test, or another script reusing
 ## the guess) can source this file and call this function without inheriting
 ## strict-mode. main() owns strict-mode; this function does not.
 detect_software_rendering() {
-   local cache_base result guess
+   local runtime_dir cache_base result guess
 
+   runtime_dir="${XDG_RUNTIME_DIR:-/run/user/${UID}}"
    cache_base=""
-   if [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -d "${XDG_RUNTIME_DIR}" ]; then
-      cache_base="${XDG_RUNTIME_DIR}/detect-software-rendering"
+   if [ -d "${runtime_dir}" ] && [ -w "${runtime_dir}" ]; then
+      cache_base="${runtime_dir}/detect-software-rendering"
    fi
 
    ## Cache HIT is a filename test: the '.<result>' marker present is the answer.
