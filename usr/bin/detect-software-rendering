@@ -65,23 +65,27 @@ probe_renderer() {
       return 0
    fi
 
+   ## A GPU node is present but eglinfo is not installed -> cannot tell -> unknown.
+   if ! has eglinfo ; then
+      printf '%s\n' "unknown"
+      return 0
+   fi
+
    eglinfo_output=""
    renderer_line=""
    timeout_maybe=""
 
-   if has eglinfo ; then
-      ## 'timeout' (coreutils, Essential: yes) bounds eglinfo; empty prefix when
-      ## it is somehow absent, in which case eglinfo runs unbounded.
-      if has timeout ; then
-         timeout_maybe="timeout 5"
-      fi
-      ## Deliberate word-splitting: 'timeout 5' -> two words, or nothing. 'env'
-      ## unsets DISPLAY/WAYLAND_DISPLAY so eglinfo cannot block on a display-server
-      ## connect; the renderer still comes from the surfaceless/GBM/device paths.
-      # shellcheck disable=SC2086
-      eglinfo_output="$(${timeout_maybe} env --unset=DISPLAY --unset=WAYLAND_DISPLAY eglinfo -B 2>/dev/null)" || true
-      renderer_line="$(printf '%s\n' "${eglinfo_output}" | grep --fixed-strings -- "OpenGL core profile renderer:")" || true
+   ## 'timeout' (coreutils, Essential: yes) bounds eglinfo; empty prefix if it is
+   ## somehow absent, running eglinfo unbounded. 'env' unsets DISPLAY /
+   ## WAYLAND_DISPLAY so eglinfo cannot block on a display-server connect; the
+   ## renderer still comes from the surfaceless/GBM/device platforms.
+   if has timeout ; then
+      timeout_maybe="timeout 5"
    fi
+   ## Deliberate word-splitting: 'timeout 5' -> two words, or nothing.
+   # shellcheck disable=SC2086
+   eglinfo_output="$(${timeout_maybe} env --unset=DISPLAY --unset=WAYLAND_DISPLAY eglinfo -B 2>/dev/null)" || true
+   renderer_line="$(printf '%s\n' "${eglinfo_output}" | grep --fixed-strings -- "OpenGL core profile renderer:")" || true
 
    ## Known hardware vendor renderer -> accelerated. Here-string, not a pipe, so
    ## a quiet grep cannot SIGPIPE the producer into a pipefail failure (R-161).
