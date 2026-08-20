@@ -1,8 +1,12 @@
-#!/bin/bash
+#!/bin/bash -e
 
 ## style-ok: no-strict -- dual-mode: strict is set only inside 'if was_executed' (a direct run, so it cannot leak into a shell that sources this file), hence not at column 0.
 ## Copyright (C) 2020 - 2025 ENCRYPTED SUPPORT LLC <adrelanos@whonix.org>
 ## See the file COPYING for copying conditions.
+
+## 'errexit' on the shebang (honoured only on a direct run, ignored when this
+## file is sourced) so a failed 'source' below - e.g. helper-scripts missing -
+## aborts immediately, before the guarded strict-mode block further down.
 
 ## provides was_executed
 # shellcheck source=../libexec/helper-scripts/check_runtime.bsh
