@@ -13,14 +13,46 @@ source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/check_runtime.bsh
 # shellcheck source=../libexec/helper-scripts/has.sh
 source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/has.sh
 
-## Probe 'eglinfo' and classify the OpenGL renderer. Best-effort only: 'eglinfo'
-## can be absent, report nothing, or - on headless VMs and Qubes AppVMs with no
-## accelerated GL (no '/dev/dri') - HANG forever on EGL/DRM probing, so it is
-## always bounded with 'timeout'. Prints exactly one word: accelerated, software
-## or unknown. Anything not a clear match is 'unknown', never assumed.
-## Pure and strict-mode free (see detect_software_rendering).
+## Classify the OpenGL renderer. Best-effort only. Prints exactly one word:
+## accelerated, software or unknown; anything not a clear match is 'unknown',
+## never assumed. Pure and strict-mode free (see detect_software_rendering).
+##
+## Two zero-cost, hang-free short-circuits run before 'eglinfo', so the common
+## no-GPU VM case never spawns a GL probe:
+##  - LIBGL_ALWAYS_SOFTWARE truthy: the Mesa stack is forced to llvmpipe.
+##  - no DRM node ('/dev/dri/renderD*', '/dev/dri/card*'): a Mesa stack has no
+##    hardware driver. (A proprietary NVIDIA driver without a DRM node is the
+##    rare miss; a VM normally has no GPU at all.)
+## Only when a DRM node is present is eglinfo asked for the actual renderer.
+## eglinfo's GBM/Wayland/device probes FAIL FAST without a DRM node; the one path
+## that can block is the X11 platform connecting to $DISPLAY when the X server
+## accepts but never replies (a half-started server during login) -- so the
+## eglinfo call is still bounded with 'timeout'.
 probe_renderer() {
-   local eglinfo_output renderer_line timeout_maybe
+   local dri_dir dri_present node eglinfo_output renderer_line timeout_maybe
+
+   ## LIBGL_ALWAYS_SOFTWARE forces the Mesa stack to llvmpipe -> software.
+   case "${LIBGL_ALWAYS_SOFTWARE:-}" in
+      1 | [Tt][Rr][Uu][Ee])
+         printf '%s\n' "software"
+         return 0
+         ;;
+   esac
+
+   ## No DRM render/card node -> no hardware Mesa driver -> software. The node
+   ## directory is overridable (DETECT_SOFTWARE_RENDERING_DRI_DIR) for tests.
+   dri_dir="${DETECT_SOFTWARE_RENDERING_DRI_DIR:-/dev/dri}"
+   dri_present=""
+   for node in "${dri_dir}"/renderD* "${dri_dir}"/card* ; do
+      if [ -e "${node}" ]; then
+         dri_present="yes"
+         break
+      fi
+   done
+   if [ -z "${dri_present}" ]; then
+      printf '%s\n' "software"
+      return 0
+   fi
 
    eglinfo_output=""
    renderer_line=""
@@ -77,11 +109,11 @@ probe_renderer() {
 ##   accelerated   1   a known hardware vendor renderer
 ##   unknown       2   eglinfo absent / empty / timed out / unrecognized
 ##
-## The renderer is a per-boot property, and probe_renderer can cost the full
-## 'timeout' on a headless VM, so the result is cached in XDG_RUNTIME_DIR (a
-## per-boot tmpfs): only the first shell after boot probes, the rest read the
-## cache. Caching is best-effort -- when XDG_RUNTIME_DIR is unset or unwritable
-## it simply probes every time.
+## The renderer is a per-boot property, and probe_renderer's eglinfo fall-through
+## can cost the full 'timeout' (only reached when a DRM node is present), so the
+## result is cached in XDG_RUNTIME_DIR (a per-boot tmpfs): only the first shell
+## after boot probes, the rest read the cache. Caching is best-effort -- when
+## XDG_RUNTIME_DIR is unset or unwritable it simply probes every time.
 ##
 ## Pure and strict-mode free, so a caller (unit test, or another script reusing
 ## the guess) can source this file and call this function without inheriting
