@@ -169,12 +169,14 @@ shutdown() {
   ## Fallbacks, only when the recorded code cannot be trusted:
   ##   111 - the status file holds a non-number (corrupt),
   ##   112 - no status file (shutdown reached before any curl_exit),
-  ##   110 - an abnormal signal (anything but the clean 'exit') left the recorded
-  ##         status at 0: either the ERR trap fired on a command that was NOT a
-  ##         curl_exit (curl_exit never records 0 on failure), or a
-  ##         SIGTERM/SIGINT/SIGHUP killed the process mid-run -- after a header
-  ##         curl_exit recorded 0 and before the body completed. Only the clean
-  ##         'exit' path may report success; a generic error beats a false success.
+  ##   110 - the recorded status is 0 but the shutdown was NOT a clean success:
+  ##         any signal but 'exit' (the ERR trap on a command that was NOT a
+  ##         curl_exit -- which never records 0 on failure; or a
+  ##         SIGTERM/SIGINT/SIGHUP mid-run, after a header curl_exit recorded 0
+  ##         and before the body completed), OR the normal 'exit' path carrying a
+  ##         NON-zero code (a failed 'wait' -> exit "${wait_exit_code}", which
+  ##         does NOT trip ERR). Only a clean 'exit' with exit code 0 may report
+  ##         success; a generic error beats a false success.
   local status
 
   if [ -f "${statusfile}" ]; then
@@ -183,8 +185,8 @@ shutdown() {
     if ! is_whole_number "${status}"; then
       true "${BASH_SOURCE[0]} ERROR: status is not a number! status: '${status}'"
       status="111"
-    elif [ "${signal}" != "exit" ] && [ "${status}" -eq 0 ]; then
-      true "${BASH_SOURCE[0]} ERROR: abnormal signal '${signal}' with a 0 status file; using generic error 110"
+    elif [ "${status}" -eq 0 ] && { [ "${signal}" != "exit" ] || [ "${exit_code}" -ne 0 ]; }; then
+      true "${BASH_SOURCE[0]} ERROR: abnormal termination (signal '${signal}', exit code '${exit_code}') with a 0 status file; using generic error 110"
       status="110"
     fi
   else
