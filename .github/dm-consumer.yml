@@ -25,4 +25,7 @@ dist-ai-tests:
   ## adversarial case as a hidden change.
   ## curl + ncurses-bin (tput): curl-prgrs probes both with 'has' at startup, so
   ## curl_prgrs_test.sh (which drives the real curl-prgrs) FATALs without them.
-  apt-packages: "python3 python3-pytest python3-hypothesis python3-pyqt5 safe-rm curl ncurses-bin"
+  ## python3-z3: the curl-prgrs formal-verification core suite
+  ## (helper-scripts-lib-tests-verify) hard-FAILs without Z3 (it must not
+  ## silently disable itself).
+  apt-packages: "python3 python3-pytest python3-hypothesis python3-pyqt5 safe-rm curl ncurses-bin python3-z3"
