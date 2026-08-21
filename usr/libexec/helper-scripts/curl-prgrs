@@ -141,14 +141,12 @@ shutdown() {
   local exit_code="$?"
   local signal="$1"
   local last_err="${BASH_COMMAND}"
-  local is_err="false"
   if [ "${signal}" = "err" ]; then
     ## '${last_err}' is the failing command, captured above. It was being
     ## captured and then discarded, so the error said a signal arrived but not
     ## what had failed -- the one detail worth having.
     stecho "${BASH_SOURCE[0]} ERROR: Signal ${signal} received while running '${last_err}'. Exiting." >&4
     stecho "${BASH_SOURCE[0]} ERROR: BASH_COMMAND '${BASH_COMMAND}' exit code '${exit_code}'." >&4
-    is_err="true"
   elif [ "${signal}" = "exit" ]; then
     true "${BASH_SOURCE[0]} INFO: Signal ${signal} received. Exiting." >&4
   else
@@ -171,9 +169,12 @@ shutdown() {
   ## Fallbacks, only when the recorded code cannot be trusted:
   ##   111 - the status file holds a non-number (corrupt),
   ##   112 - no status file (shutdown reached before any curl_exit),
-  ##   110 - the ERR trap fired but the recorded status is 0, i.e. the failing
-  ##         command was NOT a curl_exit (which never records 0 on failure), so
-  ##         a generic error beats a false success.
+  ##   110 - an abnormal signal (anything but the clean 'exit') left the recorded
+  ##         status at 0: either the ERR trap fired on a command that was NOT a
+  ##         curl_exit (curl_exit never records 0 on failure), or a
+  ##         SIGTERM/SIGINT/SIGHUP killed the process mid-run -- after a header
+  ##         curl_exit recorded 0 and before the body completed. Only the clean
+  ##         'exit' path may report success; a generic error beats a false success.
   local status
 
   if [ -f "${statusfile}" ]; then
@@ -182,8 +183,8 @@ shutdown() {
     if ! is_whole_number "${status}"; then
       true "${BASH_SOURCE[0]} ERROR: status is not a number! status: '${status}'"
       status="111"
-    elif [ "${is_err}" = "true" ] && [ "${status}" -eq 0 ]; then
-      true "${BASH_SOURCE[0]} ERROR: err trap with a 0 status file; using generic error 110"
+    elif [ "${signal}" != "exit" ] && [ "${status}" -eq 0 ]; then
+      true "${BASH_SOURCE[0]} ERROR: abnormal signal '${signal}' with a 0 status file; using generic error 110"
       status="110"
     fi
   else
