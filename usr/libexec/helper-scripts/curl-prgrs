@@ -348,6 +348,13 @@ curl_exit() {
   curl_exit_code="$1"
   true "${BASH_SOURCE[0]} INFO: write ${curl_exit_code} to ${statusfile}"
   stecho "${curl_exit_code}" > "${statusfile}"
+  ## curl for this attempt is concluding (reaped on success, killed just below on
+  ## failure), so drop its published PID. Otherwise the main shell's later EXIT
+  ## trap would re-read a now-dead PID and, under PID reuse, SIGKILL an unrelated
+  ## process. The SIGTERM path never reaches curl_exit, so the live PID stays
+  ## published there for the signal handler to kill.
+  : "${curl_pid_file:=""}"
+  printf '%s' '' > "${curl_pid_file}" 2>/dev/null || true
   if [ "${curl_exit_code}" = "0" ]; then
     return 0
   fi
@@ -414,7 +421,10 @@ curl_download() {
   ${CURL} --no-progress-meter "$@" &
   curl_pid="$!"
   ## Publish curl's PID so the main shell's shutdown can kill it on a signal
-  ## (curl_pid itself is local to this subshell).
+  ## (curl_pid itself is local to this subshell). A SIGTERM in the sub-millisecond
+  ## window before this write lands would fall back to the pre-fix behaviour (the
+  ## download continues) rather than misbehaving -- an accepted residual, since a
+  ## real signal arrives seconds into a transfer, not between these two lines.
   printf '%s\n' "${curl_pid}" > "${curl_pid_file}"
 
   ## Additional validation.
