@@ -108,6 +108,13 @@ initialize_variables() {
   # exit status of curl from the forked child process back to the parent.
   statusfile="${temporary_directory}/status"
 
+  # curl runs in a subshell (the header command substitution, then the
+  # backgrounded body worker), so the 'curl_pid' it sets is NOT visible to the
+  # main shell. The worker records curl's real PID here so the main shell's
+  # signal traps can actually kill the in-flight download -- otherwise a SIGTERM
+  # to this script leaves curl running.
+  curl_pid_file="${temporary_directory}/curl.pid"
+
   expected_header_size=8000
   maximum_http_header_size=32000
 }
@@ -195,6 +202,16 @@ shutdown() {
   #stat="$(stcat "$statusfile")"
   #stecho "$stat" >&4
 
+  ## Read the PID curl_download published BEFORE the temp dir (which holds the
+  ## file) is removed. In the main shell curl_pid is empty -- curl runs in a
+  ## subshell -- so this file is what lets a SIGTERM to this script kill the
+  ## in-flight download.
+  local published_curl_pid=""
+  : "${curl_pid_file:=""}"
+  if [ -n "${curl_pid_file}" ] && [ -f "${curl_pid_file}" ]; then
+    published_curl_pid="$(cat -- "${curl_pid_file}" 2>/dev/null || true)"
+  fi
+
   ## Only the MAIN shell removes the temp dir. curl_download runs backgrounded in
   ## a subshell that inherits these traps, so this function can also run there; if
   ## that subshell deleted the temp dir on an error, the main shell's shutdown
@@ -209,7 +226,10 @@ shutdown() {
   true curl_pid
   : "${curl_pid:=""}"
 
-  processes_list="${curl_pid}"
+  ## Kill curl by both the local curl_pid (set when shutdown runs inside the
+  ## worker) and the published PID (the only one the main shell knows). A stale
+  ## or dead PID is skipped by the 'kill -0' guard.
+  processes_list="${curl_pid} ${published_curl_pid}"
   for processes_item in ${processes_list} ; do
     if kill -0 -- "${processes_item}" 2>/dev/null ; then
       #ps -p "$processes_item" || true
@@ -393,6 +413,9 @@ curl_download() {
 
   ${CURL} --no-progress-meter "$@" &
   curl_pid="$!"
+  ## Publish curl's PID so the main shell's shutdown can kill it on a signal
+  ## (curl_pid itself is local to this subshell).
+  printf '%s\n' "${curl_pid}" > "${curl_pid_file}"
 
   ## Additional validation.
   ## Already validated earlier, but:
