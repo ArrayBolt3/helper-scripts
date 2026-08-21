@@ -609,10 +609,16 @@ main() {
   shopt -s shift_verbose
   export LC_ALL=C
 
-  traps_enable
+  ## Register the shutdown traps ONLY AFTER initialization and validation. The
+  ## trap reads variables that initialize_variables sets (statusfile,
+  ## temporary_directory, ...), and its status-file logic would otherwise turn a
+  ## setup failure into a generic error: check_variables' documented 'exit 57'
+  ## for a missing CURL_OUT_FILE would be masked to 112 (no status file yet), and
+  ## a trap firing before statusfile is assigned would itself fail under nounset.
   initialize_terminal
   initialize_variables
   check_variables
+  traps_enable
   run_download "$@"
 }
 
