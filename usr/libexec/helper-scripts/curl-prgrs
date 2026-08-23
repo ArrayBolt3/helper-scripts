@@ -400,6 +400,25 @@ classify_download_size() {
   printf '%s' 0
 }
 
+# The content-length ceiling classify_download_size must enforce for the current
+# phase. Body phase: the advertised Content-Length. Header phase:
+# curl_prgrs_content_length is only an estimate (expected_header_size), so
+# enforcing it as a ceiling would fail a legitimate large header with 114; the
+# genuine header limit is the hard cap (max_bytes), so return that -- keeping the
+# over-cap 81 (endless-data) check while removing the false 114 in the header
+# phase. Pure and strict-mode free.
+content_length_ceiling_for_phase() {
+  local header_download="$1"
+  local advertised="$2"
+  local max_bytes="$3"
+
+  if [ "${header_download}" = "true" ]; then
+    printf '%s' "${max_bytes}"
+    return 0
+  fi
+  printf '%s' "${advertised}"
+}
+
 # After curl exits, re-read the final on-disk size and re-apply the endless-data
 # ceilings to it. The last size the poll loop observed can lag the bytes curl
 # flushed in the window between that poll and the 'kill -0' that saw curl gone,
@@ -446,16 +465,11 @@ curl_download() {
   ## pass. It also selects the content-length ceiling below.
   : "${header_download:="false"}"
 
-  ## In the header phase 'curl_prgrs_content_length' is only an estimate
-  ## (expected_header_size); the genuine ceiling for a header is the maximum
-  ## header size, passed here as CURL_PRGRS_MAX_FILE_SIZE_BYTES. Treating the
-  ## estimate as a hard limit would fail a legitimate large-header response (long
-  ## redirect chains, big Set-Cookie) with 114, so enforce only the hard cap in
-  ## the header phase; the body phase keeps the real advertised length.
-  local content_length_ceiling="${curl_prgrs_content_length}"
-  if [ "${header_download}" = "true" ]; then
-    content_length_ceiling="${CURL_PRGRS_MAX_FILE_SIZE_BYTES}"
-  fi
+  ## Header phase enforces the hard cap, not the estimate (see
+  ## content_length_ceiling_for_phase); the body phase keeps the advertised length.
+  local content_length_ceiling
+  content_length_ceiling="$(content_length_ceiling_for_phase \
+    "${header_download}" "${curl_prgrs_content_length}" "${CURL_PRGRS_MAX_FILE_SIZE_BYTES}")"
 
   while true ; do
     if [ -f "${CURL_OUT_FILE}" ]; then
