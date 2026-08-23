@@ -119,6 +119,9 @@ probe_renderer() {
    ## On the proprietary NVIDIA stack the flag does not actually change GL (NVIDIA
    ## is not Mesa), but forcing software there is safe, just not the fastest -- the
    ## user asked for software. Lowercase once, then compare the truthy spellings.
+   ##
+   ## Qubes /etc/profile.d/qubes-gui.sh sets LIBGL_ALWAYS_SOFTWARE=1 among other
+   ## environment variables.
    libgl_always_software="${LIBGL_ALWAYS_SOFTWARE:-}"
    case "${libgl_always_software,,}" in
       1 | true | yes | y | t | on)
