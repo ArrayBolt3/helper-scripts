@@ -107,21 +107,21 @@ classify_renderer_line() {
 ## still read via the surfaceless/GBM/device platforms), and it is bounded with
 ## 'timeout' as a backstop.
 probe_renderer() {
-   local eglinfo_output renderer_lines renderer_line timeout_maybe saw_hardware saw_software
+   local eglinfo_output renderer_lines renderer_line timeout_maybe saw_hardware saw_software libgl_always_software
 
-   ## LIBGL_ALWAYS_SOFTWARE forces the MESA stack to llvmpipe -> software. It is
-   ## Mesa-only: the proprietary NVIDIA libGL IGNORES it, so when an NVIDIA node
-   ## is present we cannot conclude software from this variable alone -- fall
-   ## through to the eglinfo probe, which reads the real renderer. Accept the
-   ## truthy spellings Mesa treats as true; a spelling we miss still resolves via
-   ## the probe (llvmpipe -> software), so this remains a fast-path, not the
-   ## source of truth.
-   case "${LIBGL_ALWAYS_SOFTWARE:-}" in
-      1 | [Tt][Rr][Uu][Ee] | [Yy][Ee][Ss] | [Yy] | [Tt] | [Oo][Nn])
-         if ! nvidia_node_present ; then
-            printf '%s\n' "software"
-            return 0
-         fi
+   ## LIBGL_ALWAYS_SOFTWARE is a deliberate user/admin DIRECTIVE to force software
+   ## rendering -- a Mesa variable (docs.mesa3d.org/envvars.html: "if set to true,
+   ## always use software rendering"); nothing in the OS sets it. Honor the intent
+   ## regardless of driver: report software without probing. This matches what the
+   ## consumer does with it (force the software QML renderer) and is crash-safe.
+   ## On the proprietary NVIDIA stack the flag does not actually change GL (NVIDIA
+   ## is not Mesa), but forcing software there is safe, just not the fastest -- the
+   ## user asked for software. Lowercase once, then compare the truthy spellings.
+   libgl_always_software="${LIBGL_ALWAYS_SOFTWARE:-}"
+   case "${libgl_always_software,,}" in
+      1 | true | yes | y | t | on)
+         printf '%s\n' "software"
+         return 0
          ;;
    esac
 
