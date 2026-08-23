@@ -13,21 +13,30 @@ source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/check_runtime.bsh
 # shellcheck source=../libexec/helper-scripts/has.sh
 source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/has.sh
 
+## True if the proprietary NVIDIA control node ('/dev/nvidiactl') is present.
+## Overridable (DETECT_SOFTWARE_RENDERING_NVIDIA_CTL) for tests. Pure and
+## strict-mode free.
+nvidia_node_present() {
+   local nvidia_ctl
+
+   nvidia_ctl="${DETECT_SOFTWARE_RENDERING_NVIDIA_CTL:-/dev/nvidiactl}"
+   [ -e "${nvidia_ctl}" ]
+}
+
 ## True if a DRM node ('/dev/dri/renderD*', '/dev/dri/card*') or the NVIDIA
 ## control node ('/dev/nvidiactl') is present. Both paths are overridable
 ## (DETECT_SOFTWARE_RENDERING_DRI_DIR, DETECT_SOFTWARE_RENDERING_NVIDIA_CTL) for
 ## tests. Pure and strict-mode free.
 gpu_node_present() {
-   local dri_dir nvidia_ctl node
+   local dri_dir node
 
    dri_dir="${DETECT_SOFTWARE_RENDERING_DRI_DIR:-/dev/dri}"
-   nvidia_ctl="${DETECT_SOFTWARE_RENDERING_NVIDIA_CTL:-/dev/nvidiactl}"
    for node in "${dri_dir}"/renderD* "${dri_dir}"/card* ; do
       if [ -e "${node}" ]; then
          return 0
       fi
    done
-   [ -e "${nvidia_ctl}" ]
+   nvidia_node_present
 }
 
 ## Classify the OpenGL renderer. Best-effort only. Prints exactly one word:
@@ -51,11 +60,19 @@ gpu_node_present() {
 probe_renderer() {
    local eglinfo_output renderer_line timeout_maybe
 
-   ## LIBGL_ALWAYS_SOFTWARE forces the Mesa stack to llvmpipe -> software.
+   ## LIBGL_ALWAYS_SOFTWARE forces the MESA stack to llvmpipe -> software. It is
+   ## Mesa-only: the proprietary NVIDIA libGL IGNORES it, so when an NVIDIA node
+   ## is present we cannot conclude software from this variable alone -- fall
+   ## through to the eglinfo probe, which reads the real renderer. Accept the
+   ## truthy spellings Mesa treats as true; a spelling we miss still resolves via
+   ## the probe (llvmpipe -> software), so this remains a fast-path, not the
+   ## source of truth.
    case "${LIBGL_ALWAYS_SOFTWARE:-}" in
-      1 | [Tt][Rr][Uu][Ee])
-         printf '%s\n' "software"
-         return 0
+      1 | [Tt][Rr][Uu][Ee] | [Yy][Ee][Ss] | [Yy] | [Tt] | [Oo][Nn])
+         if ! nvidia_node_present ; then
+            printf '%s\n' "software"
+            return 0
+         fi
          ;;
    esac
 
@@ -90,9 +107,27 @@ probe_renderer() {
    eglinfo_output="$(${timeout_maybe} env --unset=DISPLAY --unset=WAYLAND_DISPLAY eglinfo -B 2>/dev/null)" || true
    renderer_line="$(printf '%s\n' "${eglinfo_output}" | grep --fixed-strings -- "OpenGL core profile renderer:")" || true
 
-   ## Known hardware vendor renderer -> accelerated. Here-string, not a pipe, so
-   ## a quiet grep cannot SIGPIPE the producer into a pipefail failure (R-161).
-   if grep --quiet --fixed-strings \
+   ## Software renderers FIRST, before the vendor list: several carry a hardware
+   ## vendor token as a substring (Apple's "Apple Software Renderer", Microsoft's
+   ## WARP "D3D12 (Microsoft Basic Render Driver)"), so a vendor-first test would
+   ## misreport them as accelerated. Match the known CPU-renderer markers,
+   ## case-insensitive. Here-string, not a pipe, so a quiet grep cannot SIGPIPE
+   ## the producer into a pipefail failure (R-161).
+   if grep --quiet --ignore-case --fixed-strings \
+      -e "llvmpipe" \
+      -e "softpipe" \
+      -e "swrast" \
+      -e "software renderer" \
+      -e "software rasterizer" \
+      -e "basic render driver" \
+      <<< "${renderer_line}" ; then
+      printf '%s\n' "software"
+      return 0
+   fi
+
+   ## Known hardware vendor renderer -> accelerated. --word-regexp so a token
+   ## matches only as a whole word: "ATI" must not match inside "NATIVE".
+   if grep --quiet --fixed-strings --word-regexp \
       -e "AMD" \
       -e "NVIDIA" \
       -e "Intel" \
@@ -113,11 +148,6 @@ probe_renderer() {
       -e "D3D12" \
       <<< "${renderer_line}" ; then
       printf '%s\n' "accelerated"
-      return 0
-   fi
-
-   if grep --quiet --fixed-strings -- "llvmpipe" <<< "${renderer_line}" ; then
-      printf '%s\n' "software"
       return 0
    fi
 
@@ -164,6 +194,7 @@ main() {
    set -o errtrace
    shopt -s inherit_errexit
    shopt -s shift_verbose
+   export LC_ALL=C
 
    detect_software_rendering "$@"
 }
