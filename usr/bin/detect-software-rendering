@@ -39,6 +39,55 @@ gpu_node_present() {
    nvidia_node_present
 }
 
+## Classify ONE 'OpenGL core profile renderer:' line: prints software,
+## accelerated or unknown. A software marker wins over a vendor substring WITHIN
+## the line -- a CPU renderer whose name embeds a vendor token (Apple's "Apple
+## Software Renderer", Microsoft's WARP "D3D12 (Microsoft Basic Render Driver)").
+## Vendor tokens match whole-word so "ATI" does not match inside "NATIVE".
+## Here-strings, not pipes, so a quiet grep cannot SIGPIPE the producer into a
+## pipefail failure (R-161). Pure and strict-mode free.
+classify_renderer_line() {
+   local line="$1"
+
+   if grep --quiet --ignore-case --fixed-strings \
+      -e "llvmpipe" \
+      -e "softpipe" \
+      -e "swrast" \
+      -e "software renderer" \
+      -e "software rasterizer" \
+      -e "basic render driver" \
+      <<< "${line}" ; then
+      printf '%s\n' "software"
+      return 0
+   fi
+
+   if grep --quiet --fixed-strings --word-regexp \
+      -e "AMD" \
+      -e "NVIDIA" \
+      -e "Intel" \
+      -e "Apple" \
+      -e "Adreno" \
+      -e "Radeon" \
+      -e "ATI" \
+      -e "Mali" \
+      -e "Panfrost" \
+      -e "V3D" \
+      -e "VC4" \
+      -e "PowerVR" \
+      -e "Vivante" \
+      -e "etnaviv" \
+      -e "Lima" \
+      -e "virgl" \
+      -e "SVGA3D" \
+      -e "D3D12" \
+      <<< "${line}" ; then
+      printf '%s\n' "accelerated"
+      return 0
+   fi
+
+   printf '%s\n' "unknown"
+}
+
 ## Classify the OpenGL renderer. Best-effort only. Prints exactly one word:
 ## accelerated, software or unknown; anything not a clear match is 'unknown',
 ## never assumed. Pure and strict-mode free (see detect_software_rendering).
@@ -58,7 +107,7 @@ gpu_node_present() {
 ## still read via the surfaceless/GBM/device platforms), and it is bounded with
 ## 'timeout' as a backstop.
 probe_renderer() {
-   local eglinfo_output renderer_line timeout_maybe
+   local eglinfo_output renderer_lines renderer_line timeout_maybe saw_hardware saw_software
 
    ## LIBGL_ALWAYS_SOFTWARE forces the MESA stack to llvmpipe -> software. It is
    ## Mesa-only: the proprietary NVIDIA libGL IGNORES it, so when an NVIDIA node
@@ -105,49 +154,34 @@ probe_renderer() {
    ## Deliberate word-splitting: 'timeout --kill-after=5 5' -> three words, or nothing.
    # shellcheck disable=SC2086
    eglinfo_output="$(${timeout_maybe} env --unset=DISPLAY --unset=WAYLAND_DISPLAY eglinfo -B 2>/dev/null)" || true
-   renderer_line="$(printf '%s\n' "${eglinfo_output}" | grep --fixed-strings -- "OpenGL core profile renderer:")" || true
+   renderer_lines="$(printf '%s\n' "${eglinfo_output}" | grep --fixed-strings -- "OpenGL core profile renderer:")" || true
 
-   ## Software renderers FIRST, before the vendor list: several carry a hardware
-   ## vendor token as a substring (Apple's "Apple Software Renderer", Microsoft's
-   ## WARP "D3D12 (Microsoft Basic Render Driver)"), so a vendor-first test would
-   ## misreport them as accelerated. Match the known CPU-renderer markers,
-   ## case-insensitive. Here-string, not a pipe, so a quiet grep cannot SIGPIPE
-   ## the producer into a pipefail failure (R-161).
-   if grep --quiet --ignore-case --fixed-strings \
-      -e "llvmpipe" \
-      -e "softpipe" \
-      -e "swrast" \
-      -e "software renderer" \
-      -e "software rasterizer" \
-      -e "basic render driver" \
-      <<< "${renderer_line}" ; then
-      printf '%s\n' "software"
+   ## 'eglinfo -B' prints a renderer line PER EGL platform (surfaceless, GBM,
+   ## device, ...); a platform that cannot initialise can fall back to llvmpipe
+   ## while another reports the real GPU. Classify EACH line and let HARDWARE win
+   ## across platforms -- the GPU is present if any platform sees it -- so a
+   ## single llvmpipe fallback line cannot mask a hardware renderer. Only when NO
+   ## line is hardware and at least one is software do we report software.
+   saw_hardware="false"
+   saw_software="false"
+   while IFS= read -r renderer_line ; do
+      [ -n "${renderer_line}" ] || continue
+      case "$(classify_renderer_line "${renderer_line}")" in
+         accelerated)
+            saw_hardware="true"
+            ;;
+         software)
+            saw_software="true"
+            ;;
+      esac
+   done <<< "${renderer_lines}"
+
+   if [ "${saw_hardware}" = "true" ]; then
+      printf '%s\n' "accelerated"
       return 0
    fi
-
-   ## Known hardware vendor renderer -> accelerated. --word-regexp so a token
-   ## matches only as a whole word: "ATI" must not match inside "NATIVE".
-   if grep --quiet --fixed-strings --word-regexp \
-      -e "AMD" \
-      -e "NVIDIA" \
-      -e "Intel" \
-      -e "Apple" \
-      -e "Adreno" \
-      -e "Radeon" \
-      -e "ATI" \
-      -e "Mali" \
-      -e "Panfrost" \
-      -e "V3D" \
-      -e "VC4" \
-      -e "PowerVR" \
-      -e "Vivante" \
-      -e "etnaviv" \
-      -e "Lima" \
-      -e "virgl" \
-      -e "SVGA3D" \
-      -e "D3D12" \
-      <<< "${renderer_line}" ; then
-      printf '%s\n' "accelerated"
+   if [ "${saw_software}" = "true" ]; then
+      printf '%s\n' "software"
       return 0
    fi
 
