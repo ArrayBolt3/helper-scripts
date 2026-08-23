@@ -400,19 +400,41 @@ classify_download_size() {
   printf '%s' 0
 }
 
+# The content-length ceiling classify_download_size must enforce for the current
+# phase. Body phase: the advertised Content-Length. Header phase:
+# curl_prgrs_content_length is only an estimate (expected_header_size), so
+# enforcing it as a ceiling would fail a legitimate large header with 114; the
+# genuine header limit is the hard cap (max_bytes), so return that -- keeping the
+# over-cap 81 (endless-data) check while removing the false 114 in the header
+# phase. Pure and strict-mode free.
+content_length_ceiling_for_phase() {
+  local header_download="$1"
+  local advertised="$2"
+  local max_bytes="$3"
+
+  if [ "${header_download}" = "true" ]; then
+    printf '%s' "${max_bytes}"
+    return 0
+  fi
+  printf '%s' "${advertised}"
+}
+
 # After curl exits, re-read the final on-disk size and re-apply the endless-data
 # ceilings to it. The last size the poll loop observed can lag the bytes curl
 # flushed in the window between that poll and the 'kill -0' that saw curl gone,
 # which would misreport a complete download as truncated (115); re-checking the
 # ceilings also catches an over-limit final write the loop never polled. Updates
 # size_file_downloaded_bytes in the caller (read by the truncation check).
+# The content-length ceiling to enforce is passed in ($1): the body phase uses
+# the advertised length, the header phase the hard cap (see curl_download).
 enforce_final_size() {
+  local content_length="$1"
   if [ ! -f "${CURL_OUT_FILE}" ]; then
     return 0
   fi
   size_file_downloaded_bytes="$(stat -c "%s" -- "${CURL_OUT_FILE}")"
   local size_check_code
-  size_check_code="$(classify_download_size "${size_file_downloaded_bytes}" "${CURL_PRGRS_MAX_FILE_SIZE_BYTES}" "${curl_prgrs_content_length}")"
+  size_check_code="$(classify_download_size "${size_file_downloaded_bytes}" "${CURL_PRGRS_MAX_FILE_SIZE_BYTES}" "${content_length}")"
   if [ "${size_check_code}" != "0" ]; then
     curl_exit "${size_check_code}"
   fi
@@ -437,15 +459,27 @@ curl_download() {
     curl_exit 116
   fi
 
+  ## header_download: both in-file call sites set it via env prefix; default it
+  ## for a direct sourced caller. "false" is the safe default -- it keeps the 115
+  ## truncation check below ENABLED, since skipping it would let a short download
+  ## pass. It also selects the content-length ceiling below.
+  : "${header_download:="false"}"
+
+  ## Header phase enforces the hard cap, not the estimate (see
+  ## content_length_ceiling_for_phase); the body phase keeps the advertised length.
+  local content_length_ceiling
+  content_length_ceiling="$(content_length_ceiling_for_phase \
+    "${header_download}" "${curl_prgrs_content_length}" "${CURL_PRGRS_MAX_FILE_SIZE_BYTES}")"
+
   while true ; do
     if [ -f "${CURL_OUT_FILE}" ]; then
       size_file_downloaded_bytes="$(stat -c "%s" -- "${CURL_OUT_FILE}")"
 
       true "size_file_downloaded_bytes: ${size_file_downloaded_bytes}"
       true "CURL_PRGRS_MAX_FILE_SIZE_BYTES: ${CURL_PRGRS_MAX_FILE_SIZE_BYTES}"
-      true "curl_prgrs_content_length: ${curl_prgrs_content_length}"
+      true "content_length_ceiling: ${content_length_ceiling}"
 
-      size_check_code="$(classify_download_size "${size_file_downloaded_bytes}" "${CURL_PRGRS_MAX_FILE_SIZE_BYTES}" "${curl_prgrs_content_length}")"
+      size_check_code="$(classify_download_size "${size_file_downloaded_bytes}" "${CURL_PRGRS_MAX_FILE_SIZE_BYTES}" "${content_length_ceiling}")"
       if [ "${size_check_code}" != "0" ]; then
         curl_exit "${size_check_code}"
       fi
@@ -467,13 +501,10 @@ curl_download() {
   done
 
   ## curl already terminated.
-  enforce_final_size
+  enforce_final_size "${content_length_ceiling}"
 
-  ## Both in-file call sites pass 'header_download=' as a per-call env prefix,
-  ## but this is a SOURCED library and an external caller need not. Defaulting
-  ## to "false" keeps the truncation check below ENABLED for such a caller --
-  ## the safe direction, since skipping it would let a short download pass.
-  : "${header_download:="false"}"
+  ## header_download is defaulted to "false" above (before the poll loop), so the
+  ## truncation check below stays ENABLED for a direct sourced caller too.
   : "${size_file_downloaded_bytes:=""}"
   if is_whole_number "${size_file_downloaded_bytes}" ; then
     true "size_file_downloaded_bytes: ${size_file_downloaded_bytes}"
