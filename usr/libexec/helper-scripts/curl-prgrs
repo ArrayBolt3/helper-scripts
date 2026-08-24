@@ -99,6 +99,15 @@ initialize_variables() {
   : "${curl_prgrs_print_progress:="yes"}"
   percent_last=""
 
+  expected_header_size=8000
+  maximum_http_header_size=32000
+}
+
+## Create the temp dir and derive the status / curl-pid file paths. Called in
+## main() only AFTER check_variables, so an early config-error exit (57) never
+## creates an ownerless /tmp/tmp.* dir: the cleanup EXIT trap is installed later
+## still (traps_enable), so anything created here must be guarded by it.
+initialize_temporary_files() {
   temp_dir_auto_generated=true
   temporary_directory="$(mktemp --directory)"
 
@@ -114,9 +123,6 @@ initialize_variables() {
   # signal traps can actually kill the in-flight download -- otherwise a SIGTERM
   # to this script leaves curl running.
   curl_pid_file="${temporary_directory}/curl.pid"
-
-  expected_header_size=8000
-  maximum_http_header_size=32000
 }
 
 check_variables() {
@@ -676,8 +682,12 @@ main() {
   shopt -s shift_verbose
   export LC_ALL=C
 
+  ## Create the temp dir ONLY AFTER check_variables, so a config-error exit 57
+  ## never leaves an ownerless /tmp/tmp.* dir (the cleanup trap is not installed
+  ## yet at that point).
+  ##
   ## Register the shutdown traps ONLY AFTER initialization and validation. The
-  ## trap reads variables that initialize_variables sets (statusfile,
+  ## trap reads variables that initialize_temporary_files sets (statusfile,
   ## temporary_directory, ...), and its status-file logic would otherwise turn a
   ## setup failure into a generic error: check_variables' documented 'exit 57'
   ## for a missing CURL_OUT_FILE would be masked to 112 (no status file yet), and
@@ -685,6 +695,7 @@ main() {
   initialize_terminal
   initialize_variables
   check_variables
+  initialize_temporary_files
   traps_enable
   run_download "$@"
 }
