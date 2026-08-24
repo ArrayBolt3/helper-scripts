@@ -21,7 +21,6 @@ nvidia_node_present() {
 
    nvidia_ctl="${DETECT_SOFTWARE_RENDERING_NVIDIA_CTL:-/dev/nvidiactl}"
    [ -e "${nvidia_ctl}" ]
-   true "INFO: nvidia_ctl ${nvidia_ctl} exists: yes"
 }
 
 ## True if a DRM node ('/dev/dri/renderD*', '/dev/dri/card*') or the NVIDIA
@@ -34,7 +33,6 @@ gpu_node_present() {
    dri_dir="${DETECT_SOFTWARE_RENDERING_DRI_DIR:-/dev/dri}"
    for node in "${dri_dir}"/renderD* "${dri_dir}"/card* ; do
       if [ -e "${node}" ]; then
-         true "INFO: node ${node} exists: yes"
          return 0
       fi
    done
