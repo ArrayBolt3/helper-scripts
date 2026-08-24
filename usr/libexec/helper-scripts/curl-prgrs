@@ -634,11 +634,18 @@ run_download() {
   ## also keeps it valid when the caller uses '--': it is parsed before the caller's
   ## end-of-options marker. '--write-out' echoes the Content-Length to stdout.
   ##
-  ## Residual, deliberately NOT chased (defusing them needs a curl option-grammar
-  ## parser): an ATTACHED resume offset ('-C100'/'-C-') survives -- it forces a
-  ## Range request and a 206 can report a partial Content-Length; the space forms
-  ## ('-C -' / '-C 100' / '-o' / '--output') ARE stripped above. Multiple URLs in
-  ## one call are unsupported (this wraps a single download).
+  ## Residual, deliberately NOT chased -- the probe SHARES the caller's argv, and
+  ## defusing every way a caller option can influence it needs either a curl
+  ## option-grammar parser or a probe redesign, both out of scope. A positional
+  ## override only works where curl's own precedence allows it WITHOUT breaking the
+  ## caller's '--' (an append past '--' becomes a bogus URL), which is true for the
+  ## output pairing above but NOT for last-wins options. Known residuals, all
+  ## pre-existing: a caller '--write-out'/'-w' overrides ours (last wins) so the
+  ## probe can read the wrong value; an ATTACHED resume offset ('-C100'/'-C-')
+  ## forces a Range whose 206 can report a partial Content-Length (the space forms
+  ## '-C -' / '-C 100' ARE stripped above); '--output-dir' reprefixes our
+  ## '--output'; a '.curlrc' 'output' can claim the URL. These need a caller that
+  ## does not pass such options to a single-download progress wrapper.
   curl_prgrs_content_length="$(
     header_download="true" \
     curl_prgrs_content_length="${expected_header_size}" \
