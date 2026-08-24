@@ -625,13 +625,17 @@ run_download() {
   ## CURL_PRGRS_EXEC="" to avoid a progress bar for the header download.
   ## That would confuse yad.
   ##
-  ## Write the HEAD response to "$header_file", never the caller's file. Our
-  ## '--output' MUST precede "${header_arguments[@]}": curl pairs output options
-  ## to URLs left-to-right, so ours claims the URL first and any output option the
-  ## caller passed (incl. bundled '-LO' / attached '-ofile' the stripper cannot
-  ## catch) is a harmless "more output options than URLs" extra rather than
-  ## hijacking the probe into the caller's file. '--write-out' still echoes the
-  ## Content-Length to stdout.
+  ## The probe must report the FULL resource size and write only to "$header_file",
+  ## whatever output/resume options the caller passed -- WITHOUT parsing curl's
+  ## option grammar. Two positional overrides exploit curl's own precedence, so
+  ## even attached/bundled spellings the stripper cannot catch are defeated:
+  ##  - '--output "$header_file"' goes FIRST: curl pairs output options to URLs
+  ##    left-to-right, so ours claims the URL and a caller '-o'/'-O'/'-LO' becomes
+  ##    a harmless "more output options than URLs" extra, not a probe hijack.
+  ##  - '--continue-at 0' goes LAST: the last resume option wins, cancelling a
+  ##    caller '-C'/'-C100' that would otherwise force a Range request and yield a
+  ##    partial (206) Content-Length -> a false 114 on the body.
+  ## '--write-out' still echoes the Content-Length to stdout.
   curl_prgrs_content_length="$(
     header_download="true" \
     curl_prgrs_content_length="${expected_header_size}" \
@@ -643,6 +647,7 @@ run_download() {
         --write-out '%header{Content-Length}' \
         --output "${header_file}" \
         "${header_arguments[@]}" \
+        --continue-at 0 \
     )"
 
   ## Reset from previews invocation of curl_download, which calls print_progress.
