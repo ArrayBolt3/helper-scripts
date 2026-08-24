@@ -533,29 +533,35 @@ remove_argument_for_header_request() {
   local skip_next=false
   header_arguments=()
 
+  ## Strip every OUTPUT/RESUME option from the header probe, which appends its own
+  ## '--output "${header_file}"'. curl pairs output options to URLs in order, so a
+  ## surviving user output option is matched to the URL FIRST and the appended
+  ## '--output' is ignored -- the HEAD response would be written to the user's file
+  ## (or a remote-name file) during a headers-only request. Forms handled:
+  ##   -o VALUE / --output VALUE / -C VALUE / --continue-at VALUE  (value NEXT arg),
+  ##   -oVALUE / -CVALUE / -C-                                     (value attached),
+  ##   --output=VALUE / --continue-at=VALUE                        (long, '=' glued),
+  ##   -O / --remote-name / --remote-name-all                      (no value).
+  ## NOT handled (rare, and unstripped originally too): output options bundled with
+  ## other shorts in one cluster, e.g. '-sO' or '-sofile'.
   for arg_item in "$@"; do
     if [ "${skip_next}" = true ]; then
       skip_next=false
       continue
     fi
 
-    if [ "${arg_item}" = "--continue-at" ]; then
-      skip_next=true
-      continue
-    fi
-    if [ "${arg_item}" = "-C" ]; then
-      skip_next=true
-      continue
-    fi
-
-    if [ "${arg_item}" = "--output" ]; then
-      skip_next=true
-      continue
-    fi
-    if [ "${arg_item}" = "-o" ]; then
-      skip_next=true
-      continue
-    fi
+    case "${arg_item}" in
+      -o | --output | -C | --continue-at)
+        skip_next=true
+        continue
+        ;;
+      -O | --remote-name | --remote-name-all)
+        continue
+        ;;
+      -o?* | -C?* | --output=* | --continue-at=*)
+        continue
+        ;;
+    esac
 
     arg_list+=("${arg_item}")
   done
