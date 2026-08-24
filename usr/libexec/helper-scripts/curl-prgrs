@@ -533,35 +533,37 @@ remove_argument_for_header_request() {
   local skip_next=false
   header_arguments=()
 
-  ## Strip every OUTPUT/RESUME option from the header probe, which appends its own
-  ## '--output "${header_file}"'. curl pairs output options to URLs in order, so a
-  ## surviving user output option is matched to the URL FIRST and the appended
-  ## '--output' is ignored -- the HEAD response would be written to the user's file
-  ## (or a remote-name file) during a headers-only request. Forms handled:
-  ##   -o VALUE / --output VALUE / -C VALUE / --continue-at VALUE  (value NEXT arg),
-  ##   -oVALUE / -CVALUE / -C-                                     (value attached),
-  ##   --output=VALUE / --continue-at=VALUE                        (long, '=' glued),
-  ##   -O / --remote-name / --remote-name-all                      (no value).
-  ## NOT handled (rare, and unstripped originally too): output options bundled with
-  ## other shorts in one cluster, e.g. '-sO' or '-sofile'.
+  ## Best-effort strip of the user's output/resume options for the header probe.
+  ## This drops the exact '-o'/'--output'/'-C'/'--continue-at' spellings to keep
+  ## the probe's argv clean; it deliberately does NOT try to enumerate every curl
+  ## output-option form (attached '-ofile', bundled '-LO', '--output=x', ...) --
+  ## that way lies a curl-argv parser. The ROBUST guarantee that the probe writes
+  ## only to the header file lives in run_download, which passes ITS '--output'
+  ## ahead of these args so curl pairs the header file to the URL first (any
+  ## surviving user output option becomes a harmless extra).
   for arg_item in "$@"; do
     if [ "${skip_next}" = true ]; then
       skip_next=false
       continue
     fi
 
-    case "${arg_item}" in
-      -o | --output | -C | --continue-at)
-        skip_next=true
-        continue
-        ;;
-      -O | --remote-name | --remote-name-all)
-        continue
-        ;;
-      -o?* | -C?* | --output=* | --continue-at=*)
-        continue
-        ;;
-    esac
+    if [ "${arg_item}" = "--continue-at" ]; then
+      skip_next=true
+      continue
+    fi
+    if [ "${arg_item}" = "-C" ]; then
+      skip_next=true
+      continue
+    fi
+
+    if [ "${arg_item}" = "--output" ]; then
+      skip_next=true
+      continue
+    fi
+    if [ "${arg_item}" = "-o" ]; then
+      skip_next=true
+      continue
+    fi
 
     arg_list+=("${arg_item}")
   done
@@ -623,9 +625,13 @@ run_download() {
   ## CURL_PRGRS_EXEC="" to avoid a progress bar for the header download.
   ## That would confuse yad.
   ##
-  ## CURL_OUT_FILE and
-  ## --output "$header_file" to avoid overwriting files when using "--continue-at -".
-  ## '--write-out' will echo.
+  ## Write the HEAD response to "$header_file", never the caller's file. Our
+  ## '--output' MUST precede "${header_arguments[@]}": curl pairs output options
+  ## to URLs left-to-right, so ours claims the URL first and any output option the
+  ## caller passed (incl. bundled '-LO' / attached '-ofile' the stripper cannot
+  ## catch) is a harmless "more output options than URLs" extra rather than
+  ## hijacking the probe into the caller's file. '--write-out' still echoes the
+  ## Content-Length to stdout.
   curl_prgrs_content_length="$(
     header_download="true" \
     curl_prgrs_content_length="${expected_header_size}" \
@@ -635,8 +641,8 @@ run_download() {
       curl_download \
         --head \
         --write-out '%header{Content-Length}' \
-        "${header_arguments[@]}" \
         --output "${header_file}" \
+        "${header_arguments[@]}" \
     )"
 
   ## Reset from previews invocation of curl_download, which calls print_progress.
