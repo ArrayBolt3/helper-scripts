@@ -99,6 +99,15 @@ initialize_variables() {
   : "${curl_prgrs_print_progress:="yes"}"
   percent_last=""
 
+  expected_header_size=8000
+  maximum_http_header_size=32000
+}
+
+## Create the temp dir and derive the status / curl-pid file paths. Called in
+## main() only AFTER check_variables, so an early config-error exit (57) never
+## creates an ownerless /tmp/tmp.* dir: the cleanup EXIT trap is installed later
+## still (traps_enable), so anything created here must be guarded by it.
+initialize_temporary_files() {
   temp_dir_auto_generated=true
   temporary_directory="$(mktemp --directory)"
 
@@ -114,9 +123,6 @@ initialize_variables() {
   # signal traps can actually kill the in-flight download -- otherwise a SIGTERM
   # to this script leaves curl running.
   curl_pid_file="${temporary_directory}/curl.pid"
-
-  expected_header_size=8000
-  maximum_http_header_size=32000
 }
 
 check_variables() {
@@ -527,6 +533,14 @@ remove_argument_for_header_request() {
   local skip_next=false
   header_arguments=()
 
+  ## Best-effort strip of the user's output/resume options for the header probe.
+  ## This drops the exact '-o'/'--output'/'-C'/'--continue-at' spellings to keep
+  ## the probe's argv clean; it deliberately does NOT try to enumerate every curl
+  ## output-option form (attached '-ofile', bundled '-LO', '--output=x', ...) --
+  ## that way lies a curl-argv parser. The ROBUST guarantee that the probe writes
+  ## only to the header file lives in run_download, which passes ITS '--output'
+  ## ahead of these args so curl pairs the header file to the URL first (any
+  ## surviving user output option becomes a harmless extra).
   for arg_item in "$@"; do
     if [ "${skip_next}" = true ]; then
       skip_next=false
@@ -611,9 +625,27 @@ run_download() {
   ## CURL_PRGRS_EXEC="" to avoid a progress bar for the header download.
   ## That would confuse yad.
   ##
-  ## CURL_OUT_FILE and
-  ## --output "$header_file" to avoid overwriting files when using "--continue-at -".
-  ## '--write-out' will echo.
+  ## Write the HEAD response to "$header_file", never the caller's file. Our
+  ## '--output' goes FIRST -- BEFORE "${header_arguments[@]}" -- because curl pairs
+  ## output options to URLs left-to-right: ours claims the URL, so a caller output
+  ## option (any spelling: '-o'/'-O'/'-LO'/'-ofile', which no simple strip catches)
+  ## becomes a harmless "more output options than URLs" extra rather than diverting
+  ## the probe into the caller's file. Placing it first (a prepend, never an append)
+  ## also keeps it valid when the caller uses '--': it is parsed before the caller's
+  ## end-of-options marker. '--write-out' echoes the Content-Length to stdout.
+  ##
+  ## Residual, deliberately NOT chased -- the probe SHARES the caller's argv, and
+  ## defusing every way a caller option can influence it needs either a curl
+  ## option-grammar parser or a probe redesign, both out of scope. A positional
+  ## override only works where curl's own precedence allows it WITHOUT breaking the
+  ## caller's '--' (an append past '--' becomes a bogus URL), which is true for the
+  ## output pairing above but NOT for last-wins options. Known residuals, all
+  ## pre-existing: a caller '--write-out'/'-w' overrides ours (last wins) so the
+  ## probe can read the wrong value; an ATTACHED resume offset ('-C100'/'-C-')
+  ## forces a Range whose 206 can report a partial Content-Length (the space forms
+  ## '-C -' / '-C 100' ARE stripped above); '--output-dir' reprefixes our
+  ## '--output'; a '.curlrc' 'output' can claim the URL. These need a caller that
+  ## does not pass such options to a single-download progress wrapper.
   curl_prgrs_content_length="$(
     header_download="true" \
     curl_prgrs_content_length="${expected_header_size}" \
@@ -623,8 +655,8 @@ run_download() {
       curl_download \
         --head \
         --write-out '%header{Content-Length}' \
-        "${header_arguments[@]}" \
         --output "${header_file}" \
+        "${header_arguments[@]}" \
     )"
 
   ## Reset from previews invocation of curl_download, which calls print_progress.
@@ -676,8 +708,12 @@ main() {
   shopt -s shift_verbose
   export LC_ALL=C
 
+  ## Create the temp dir ONLY AFTER check_variables, so a config-error exit 57
+  ## never leaves an ownerless /tmp/tmp.* dir (the cleanup trap is not installed
+  ## yet at that point).
+  ##
   ## Register the shutdown traps ONLY AFTER initialization and validation. The
-  ## trap reads variables that initialize_variables sets (statusfile,
+  ## trap reads variables that initialize_temporary_files sets (statusfile,
   ## temporary_directory, ...), and its status-file logic would otherwise turn a
   ## setup failure into a generic error: check_variables' documented 'exit 57'
   ## for a missing CURL_OUT_FILE would be masked to 112 (no status file yet), and
@@ -685,6 +721,7 @@ main() {
   initialize_terminal
   initialize_variables
   check_variables
+  initialize_temporary_files
   traps_enable
   run_download "$@"
 }
