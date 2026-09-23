@@ -1,28 +1,23 @@
-#!/bin/bash
+#!/bin/bash -e
 
 ## Copyright (C) 2025 - 2025 ENCRYPTED SUPPORT LLC <adrelanos@whonix.org>
 ## See the file COPYING for copying conditions.
 
-## This script gets 'source'ed by:
-## set-console-keymap
-## set-grub-keymap
-## set-labwc-keymap
-## set-system-keymap
-## This script acts as a "main program", not as a library.
+## Sourced by the set-console-keymap / set-grub-keymap / set-labwc-keymap /
+## set-system-keymap wrappers, which call 'main "$@"' after sourcing. main()
+## owns strict-mode, setup, and parse_cmd; the function definitions stay pure so
+## a unit test can source this file (was_executed false -> main does not run) and
+## call one function without executing the program or inheriting strict-mode.
+
+## provides was_executed
+# shellcheck source=./check_runtime.bsh
+source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/check_runtime.bsh
 
 # shellcheck source=./log_run_die.sh
 source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/log_run_die.sh
 
 # shellcheck source=./has.bsh
 source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/has.bsh
-
-set -o errexit
-set -o nounset
-set -o errtrace
-set -o pipefail
-shopt -s inherit_errexit
-shopt -s shift_verbose
-export LC_ALL=C
 
 error_handler() {
   exit_code="${?}"
@@ -1326,56 +1321,72 @@ parse_cmd() {
 #   true
 # }
 
-trap "error_handler" ERR
-trap "exit_handler" EXIT
+main() {
+  set -o errexit
+  set -o nounset
+  set -o errtrace
+  set -o pipefail
+  shopt -s inherit_errexit
+  shopt -s shift_verbose
+  export LC_ALL=C
 
-log notice "$0: Start."
-printf '%s\n' ""
+  trap "error_handler" ERR
+  trap "exit_handler" EXIT
 
-has safe-rm
-has mktemp
-has mv
-has dirname
-has mkdir
-has overwrite
-has stcat
-has sponge
-has timeout
-has ischroot
-has jq
-has tr
-has loginctl
-has pgrep
-has "${HELPER_SCRIPTS_PATH:-}/usr/libexec/helper-scripts/query-sock-pid"
-has localectl-static
+  log notice "$0: Start."
+  printf '%s\n' ""
 
-timeout_command=("timeout" "--kill-after" "5" "5")
+  has safe-rm
+  has mktemp
+  has mv
+  has dirname
+  has mkdir
+  has overwrite
+  has stcat
+  has sponge
+  has timeout
+  has ischroot
+  has jq
+  has tr
+  has loginctl
+  has pgrep
+  has "${HELPER_SCRIPTS_PATH:-}/usr/libexec/helper-scripts/query-sock-pid"
+  has localectl-static
 
-skl_xkb_env_var_names=(
-  'XKB_DEFAULT_LAYOUT'
-  'XKB_DEFAULT_VARIANT'
-  'XKB_DEFAULT_OPTIONS'
-)
-skl_default_keyboard_var_names=(
-  'XKBLAYOUT'
-  'XKBVARIANT'
-  'XKBOPTIONS'
-)
+  timeout_command=("timeout" "--kill-after" "5" "5")
 
-args=()
-skl_interactive='false'
-do_live_changes='true'
-do_persist='true'
-no_reload='false'
-do_build_all_grub_keymaps='false'
-do_force='false'
-did_prompt_for_luks='false'
+  skl_xkb_env_var_names=(
+    'XKB_DEFAULT_LAYOUT'
+    'XKB_DEFAULT_VARIANT'
+    'XKB_DEFAULT_OPTIONS'
+  )
+  skl_default_keyboard_var_names=(
+    'XKBLAYOUT'
+    'XKBVARIANT'
+    'XKBOPTIONS'
+  )
 
-[[ -v "HOME" ]] || HOME="/home/user"
-labwc_config_path="${HOME}/.config/labwc/environment"
+  args=()
+  skl_interactive='false'
+  do_live_changes='true'
+  do_persist='true'
+  no_reload='false'
+  do_build_all_grub_keymaps='false'
+  do_force='false'
+  did_prompt_for_luks='false'
 
-grub_kb_layout_dir="${grub_kb_layout_dir:-/boot/grub/kb_layouts}"
+  [[ -v "HOME" ]] || HOME="/home/user"
+  labwc_config_path="${HOME}/.config/labwc/environment"
 
-localectl_kb_layouts="$("${timeout_command[@]}" localectl-static --no-pager list-x11-keymap-layouts)"
+  grub_kb_layout_dir="${grub_kb_layout_dir:-/boot/grub/kb_layouts}"
 
-parse_cmd "$@"
+  localectl_kb_layouts="$("${timeout_command[@]}" localectl-static --no-pager list-x11-keymap-layouts)"
+
+  parse_cmd "$@"
+}
+
+## Auto-run only when executed directly. The wrappers call 'main "$@"' after
+## sourcing; a unit test sources this file and calls a function without running.
+if was_executed "${BASH_SOURCE[0]}"; then
+  main "$@"
+fi
