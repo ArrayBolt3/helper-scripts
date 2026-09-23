@@ -79,12 +79,12 @@ read_integer_file() {
     printf '%s\n' "$0: ERROR: No target file specified!" >&2
     return 1
   fi
-  if [ -n "${lower_bound}" ] && ! [[ "${lower_bound}" =~ ^(0|[1-9][0-9]*)$ ]]; then
-    printf '%s\n' "$0: ERROR: Non-numeric lower bound specified!" >&2
+  if [ -n "${lower_bound}" ] && ! is_whole_number_int64 "${lower_bound}"; then
+    printf '%s\n' "$0: ERROR: Non-numeric or out-of-range lower bound specified!" >&2
     return 1
   fi
-  if [ -n "${upper_bound}" ] && ! [[ "${upper_bound}" =~ ^(0|[1-9][0-9]*)$ ]]; then
-    printf '%s\n' "$0: ERROR: Non-numeric upper bound specified!" >&2
+  if [ -n "${upper_bound}" ] && ! is_whole_number_int64 "${upper_bound}"; then
+    printf '%s\n' "$0: ERROR: Non-numeric or out-of-range upper bound specified!" >&2
     return 1
   fi
 
@@ -108,9 +108,9 @@ read_integer_file() {
       "$0: ERROR: Empty target file '${target_file}'!" >&2
     return 1
   fi
-  if ! [[ "${file_contents}" =~ ^(0|[1-9][0-9]*)$ ]]; then
+  if ! is_whole_number_int64 "${file_contents}"; then
     sanitize-echo --max-length "${STRINGS_BSH_REPORT_MAX}" -- \
-      "$0: ERROR: Non-numeric value in target file '${target_file}'!" >&2
+      "$0: ERROR: Non-numeric or out-of-range value in target file '${target_file}'!" >&2
     return 1
   fi
   if [ -n "${lower_bound}" ] && [ "${file_contents}" -lt "${lower_bound}" ]; then
@@ -151,6 +151,16 @@ default_if_empty() {
   printf -v "${strings_bsh_var_name}" '%s' "${strings_bsh_default_value}"
 }
 
+## Locale-pin assumption (applies to every validator below that sets LC_ALL=C:
+## check_is_alpha_numeric, validate_safe_filename,
+## check_valid_linux_user_account_name, check_variable_name):
+## Each pins LC_ALL=C so bracket ranges ([A-Za-z], [0-9], ...) are byte/ASCII
+## deterministic. This ASSUMES no caller has made LC_ALL readonly. A readonly
+## UTF-8 LC_ALL makes 'local LC_ALL=C' (and 'export LC_ALL=C') FAIL, so the
+## match then runs under UTF-8 -- the very bug the pin prevents. No caller in
+## helper-scripts does this. Truly overriding a readonly LC_ALL needs a separate
+## PROCESS (a subshell inherits the readonly, so it cannot reassign it either),
+## which is not warranted for a non-existent caller.
 check_is_alpha_numeric() {
   ## LC_ALL=C prevents 'a-z' from matching Unicode characters.
   local strings_bsh_varname strings_bsh_value LC_ALL=C
@@ -276,7 +286,11 @@ check_is_not_empty_and_only_one_line() {
     return 1
   fi
 
-  mapfile -t strings_bsh_lines <<<"${strings_bsh_value}"
+  ## Strip one trailing newline: the '<<<' here-string appends a newline of its
+  ## own, so a legitimate single line ending in a newline would otherwise yield
+  ## two mapfile elements and be false-rejected as multi-line. A genuine
+  ## multi-line value still yields >1 element after the strip.
+  mapfile -t strings_bsh_lines <<<"${strings_bsh_value%$'\n'}"
   strings_bsh_number_of_lines="${#strings_bsh_lines[@]}"
 
   if [ "${strings_bsh_number_of_lines}" -ne 1 ]; then
@@ -348,6 +362,21 @@ string_quote_safe() {
 ## negative numbers such as -1
 is_whole_number() {
   [[ "$1" =~ ^(0|[1-9][0-9]*)$ ]]
+}
+
+## Whole number that also fits a signed 64-bit integer, so downstream shell
+## arithmetic ([ -lt ]/[ -gt ], intmax_t) cannot error (exit 2) on it and have
+## that error swallowed by an enclosing 'if' as a false. INT64_MAX =
+## 9223372036854775807.
+is_whole_number_int64() {
+  is_whole_number "$1" || return 1
+  ## No leading zeros (is_whole_number guarantees), so decimal length, then byte
+  ## order for equal-length digit strings, give the numeric order.
+  [ "${#1}" -lt 19 ] && return 0
+  # shellcheck disable=SC2071
+  ## Intentional STRING comparison: '-gt' would itself overflow. Digit-only,
+  ## equal length -> byte order == numeric order in any locale.
+  [ "${#1}" -eq 19 ] && [[ ! "$1" > "9223372036854775807" ]]
 }
 
 ## same results as is_whole_number, but also allows negative numbers
