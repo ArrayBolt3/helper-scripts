@@ -153,7 +153,8 @@ default_if_empty() {
 
 ## Locale-pin assumption (applies to every validator below that sets LC_ALL=C:
 ## check_is_alpha_numeric, validate_safe_filename,
-## check_valid_linux_user_account_name, check_variable_name):
+## check_valid_linux_user_account_name, check_variable_name, is_whole_number,
+## is_integer):
 ## Each pins LC_ALL=C so bracket ranges ([A-Za-z], [0-9], ...) are byte/ASCII
 ## deterministic. This ASSUMES no caller has made LC_ALL readonly. A readonly
 ## UTF-8 LC_ALL makes 'local LC_ALL=C' (and 'export LC_ALL=C') FAIL, so the
@@ -361,6 +362,11 @@ string_quote_safe() {
 ## scientific notation such as 1.23e10
 ## negative numbers such as -1
 is_whole_number() {
+  ## LC_ALL=C so '[0-9]' cannot match Unicode digits (e.g. Arabic-Indic) under
+  ## a UTF-8 locale -- the default on Debian/CI. Without it a Unicode digit
+  ## passes here, then errors ('integer expression expected', exit 2) in a
+  ## downstream '[ -lt ]'/'[ -gt ]' whose enclosing 'if' swallows it as false.
+  local LC_ALL=C
   [[ "$1" =~ ^(0|[1-9][0-9]*)$ ]]
 }
 
@@ -380,7 +386,9 @@ is_whole_number_int64() {
 }
 
 ## same results as is_whole_number, but also allows negative numbers
-is_integer(){
+is_integer() {
+  ## LC_ALL=C so '[0-9]' cannot match Unicode digits under a UTF-8 locale.
+  local LC_ALL=C
   [[ "$1" =~ ^(0|-?[1-9][0-9]*)$ ]]
 }
 
