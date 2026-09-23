@@ -434,6 +434,8 @@ gpg_bash_lib_function_displaytime() {
 
 check_variable_name() {
   ## Ensures a string is a valid Bash variable name.
+  ## LC_ALL=C prevents 'A-Za-z' from matching Unicode characters.
+  local LC_ALL=C
   [[ "$1" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]
 }
 
