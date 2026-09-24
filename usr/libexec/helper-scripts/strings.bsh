@@ -131,24 +131,24 @@ read_integer_file() {
 ##
 ##   default_if_empty TMP /tmp
 default_if_empty() {
-  local strings_bsh_var_name strings_bsh_default_value
-
-  strings_bsh_var_name="${1:-}"
-  strings_bsh_default_value="${2:-}"
-
-  if ! check_variable_name "${strings_bsh_var_name}"; then
+  if ! check_variable_name "${1:-}"; then
     sanitize-echo --max-length "${STRINGS_BSH_REPORT_MAX}" -- \
-      "$0: ERROR: ${FUNCNAME[0]}: not a variable name: '${strings_bsh_var_name}'!" >&2
+      "$0: ERROR: ${FUNCNAME[0]}: not a variable name: '${1:-}'!" >&2
     return 1
   fi
 
-  if [ -v "${strings_bsh_var_name}" ] && [ -n "${!strings_bsh_var_name}" ]; then
+  ## Operate on $1 (name) / $2 (default) DIRECTLY, never via a local copy: a
+  ## local named like the caller's target variable would shadow it (dynamic
+  ## scope), so [ -v ]/${!} would read our empty local and printf -v would write
+  ## it instead of the caller's variable. Positional parameters cannot be
+  ## shadowed.
+  if [ -v "$1" ] && [ -n "${!1}" ]; then
     return 0
   fi
 
   ## style-ok: allow-unchecked-printf-v - linter misses the check_variable_name
   ## call above.
-  printf -v "${strings_bsh_var_name}" '%s' "${strings_bsh_default_value}"
+  printf -v "$1" '%s' "${2:-}"
 }
 
 ## Locale-pin assumption (applies to every validator below that sets LC_ALL=C:
@@ -163,17 +163,20 @@ default_if_empty() {
 ## PROCESS (a subshell inherits the readonly, so it cannot reassign it either),
 ## which is not warranted for a non-existent caller.
 check_is_alpha_numeric() {
-  ## LC_ALL=C prevents 'a-z' from matching Unicode characters.
-  local strings_bsh_varname strings_bsh_value LC_ALL=C
-
   if [ -z "${1:-}" ]; then
     printf '%s\n' "$0: ERROR: No variable name provided to check_is_alpha_numeric." >&2
     return 1
   fi
 
-  strings_bsh_varname="$1"
-  check_variable_name "${strings_bsh_varname}" || return 1
-  strings_bsh_value="${!strings_bsh_varname}"
+  check_variable_name "$1" || return 1
+  ## Capture the caller's value via ${!1} (positional $1, unshadowable; the RHS
+  ## is expanded before the local binds) BEFORE declaring locals, so a caller
+  ## variable named like one of ours is not shadowed. LC_ALL=C (prevents
+  ## 'a-z'/[0-9] matching Unicode) is pinned AFTER the capture, so it does not
+  ## shadow a caller variable literally named LC_ALL either.
+  local strings_bsh_value="${!1}"
+  local strings_bsh_varname="$1"
+  local LC_ALL=C
 
   if [ "${strings_bsh_value}" = "" ]; then
     sanitize-echo --max-length "${STRINGS_BSH_REPORT_MAX}" -- "$0: ${FUNCNAME[0]}: variable content is empty!
@@ -190,28 +193,23 @@ check_is_alpha_numeric() {
 }
 
 validate_safe_filename() {
-  local strings_bsh_varname strings_bsh_value strings_bsh_reason strings_bsh_re
-
-  ## Don't allow any Unicode to pass the checks below.
-  local was_lc_all_set='false'
-  local OLD_LC_ALL="${LC_ALL:-}"
-  [ -v LC_ALL ] && was_lc_all_set='true'
-  export LC_ALL=C
-
+  ## LC_ALL=C so the [[ ]] checks below are byte/ASCII-deterministic and reject
+  ## Unicode (e.g. [[:alnum:]] must not match Unicode letters). A LOCAL (not
+  ## exported) pin auto-restores on return and never leaks the caller's LC_ALL
+  ## value OR its export state -- a plain (non-exported) caller LC_ALL must not
+  ## become exported by this call. The one external locale-sensitive command
+  ## ('wc -c' below) carries its own LC_ALL=C prefix.
   if [ -z "${1:-}" ]; then
     printf '%s\n' "$0: ERROR: ${FUNCNAME[0]}: No variable name provided to validate_safe_filename!" >&2
-    unset LC_ALL
-    [ "${was_lc_all_set}" = 'true' ] && export LC_ALL="${OLD_LC_ALL}"
     return 1
   fi
 
-  strings_bsh_varname="$1"
-  if ! check_variable_name "${strings_bsh_varname}"; then
-    unset LC_ALL
-    [ "${was_lc_all_set}" = 'true' ] && export LC_ALL="${OLD_LC_ALL}"
-    return 1
-  fi
-  strings_bsh_value="${!strings_bsh_varname}"
+  check_variable_name "$1" || return 1
+  ## Capture via ${!1} (positional, unshadowable) BEFORE declaring the locals,
+  ## so a caller variable named like one of ours is not shadowed.
+  local strings_bsh_value="${!1}"
+  local strings_bsh_varname="$1"
+  local strings_bsh_reason strings_bsh_re LC_ALL=C
 
   if [[ -z "${strings_bsh_value}" ]]; then
     strings_bsh_reason="Empty value!"
@@ -234,8 +232,6 @@ validate_safe_filename() {
     ## plus, comma, equals, @, parentheses, percent, braces, square brackets
     strings_bsh_re='^[][:alnum:]_.:@+=,(){}%\[ -]+$'
     if [[ "${strings_bsh_value}" =~ ${strings_bsh_re} ]]; then
-      unset LC_ALL
-      [ "${was_lc_all_set}" = 'true' ] && export LC_ALL="${OLD_LC_ALL}"
       return 0
     fi
     strings_bsh_reason="Invalid character!"
@@ -247,8 +243,6 @@ validate_safe_filename() {
 
   od -An -tx1 <<<"${strings_bsh_value}" | head --bytes="${STRINGS_BSH_REPORT_MAX}" >&2
 
-  unset LC_ALL
-  [ "${was_lc_all_set}" = 'true' ] && export LC_ALL="${OLD_LC_ALL}"
   return 1
 }
 
@@ -262,17 +256,17 @@ check_valid_linux_user_account_name() {
 }
 
 check_is_not_empty_and_only_one_line() {
-  local strings_bsh_varname strings_bsh_value strings_bsh_number_of_lines strings_bsh_lines
-
   if [ -z "${1:-}" ]; then
     printf '%s\n' "$0: ERROR: No variable name provided to check_is_not_empty_and_only_one_line." >&2
     return 1
   fi
 
-  strings_bsh_varname="$1"
-  check_variable_name "${strings_bsh_varname}" || return 1
-  strings_bsh_value="${!strings_bsh_varname}"
-
+  check_variable_name "$1" || return 1
+  ## Capture via ${!1} (positional, unshadowable) BEFORE declaring the locals,
+  ## so a caller variable named like one of ours is not shadowed.
+  local strings_bsh_value="${!1}"
+  local strings_bsh_varname="$1"
+  local strings_bsh_number_of_lines strings_bsh_lines
 
   ## Check if strings_bsh_value is empty or only contains spaces/newlines.
   if [ -z "${strings_bsh_value//[[:space:]]/}" ]; then
