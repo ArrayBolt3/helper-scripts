@@ -392,9 +392,9 @@ set_labwc_keymap() {
   ## Write the new config file contents and load them into 'labwc'.
   if ! overwrite "${labwc_config_path}" "${labwc_env_file_string}" >/dev/null ; then
     log error "${FUNCNAME[0]}: Cannot write new 'labwc' environment config '${labwc_config_path}'!"
-    ## In the '--no-persist' path the original config was moved to a backup
-    ## before the overwrite. Restore it so a failed overwrite does not orphan
-    ## (lose) the user's existing config.
+    ## The '--no-persist' path moves the original config to a backup before this
+    ## overwrite; restore it so a failed overwrite does not orphan (lose) the
+    ## user's existing config.
     if [ -n "${labwc_config_bak_path}" ]; then
       if ! mv -- "${labwc_config_bak_path}" "${labwc_config_path}" ; then
         log error "${FUNCNAME[0]}: Also failed to restore backup 'labwc' environment config from '${labwc_config_bak_path}' to '${labwc_config_path}'!"
@@ -1204,14 +1204,16 @@ unknown_option_error() {
 ## per-token validators split their check strings on newlines, so individually
 ## valid tokens smuggled via an embedded newline can otherwise pass validation.
 ## This is the untrusted CLI / D-Bus argument vector; the interactive UI reads a
-## single line via 'read' and so cannot carry a newline.
+## single line via 'read' and so cannot carry a newline. An omitted variant /
+## option arg is legal (empty), so check_no_control_chars -- which accepts empty
+## -- is the right shared primitive (from strings.bsh, sourced via log_run_die.sh).
 reject_control_chars_in_args() {
-  local arg
-  for arg in "$@"; do
-    if [[ "${arg}" == *[[:cntrl:]]* ]]; then
-      log error "${FUNCNAME[0]}: Control characters (newline, tab, etc.) are not allowed in keyboard layout arguments!"
-      return 1
-    fi
+  local skl_arg_value
+  ## skl_arg_value is passed BY NAME to check_no_control_chars (read there via
+  ## ${!1}); shellcheck cannot see that indirect use.
+  # shellcheck disable=SC2034
+  for skl_arg_value in "$@"; do
+    check_no_control_chars skl_arg_value || return 1
   done
   return 0
 }

@@ -153,8 +153,8 @@ default_if_empty() {
 
 ## Locale-pin assumption (applies to every validator below that sets LC_ALL=C:
 ## check_is_alpha_numeric, validate_safe_filename,
-## check_valid_linux_user_account_name, check_variable_name, is_whole_number,
-## is_integer):
+## check_valid_linux_user_account_name, check_variable_name, check_no_control_chars,
+## is_whole_number, is_integer):
 ## Each pins LC_ALL=C so bracket ranges ([A-Za-z], [0-9], ...) are byte/ASCII
 ## deterministic. This ASSUMES no caller has made LC_ALL readonly. A readonly
 ## UTF-8 LC_ALL makes 'local LC_ALL=C' (and 'export LC_ALL=C') FAIL, so the
@@ -291,6 +291,32 @@ check_is_not_empty_and_only_one_line() {
   if [ "${strings_bsh_number_of_lines}" -ne 1 ]; then
     sanitize-echo --max-length "${STRINGS_BSH_REPORT_MAX}" -- "$0: ERROR: Variable '${strings_bsh_varname}' contains more than one line. Content:
 '${strings_bsh_value}'" >&2
+    return 1
+  fi
+
+  return 0
+}
+
+check_no_control_chars() {
+  ## Rejects any control character (newline, tab, carriage return, NUL, ...) in
+  ## the named variable's value. An EMPTY value is accepted -- a caller that also
+  ## requires non-empty combines this with its own emptiness check. Use on any
+  ## value written verbatim into a line-oriented config file or passed to a
+  ## line-oriented consumer, where an embedded newline would inject an extra line.
+  if [ -z "${1:-}" ]; then
+    printf '%s\n' "$0: ERROR: ${FUNCNAME[0]}: No variable name provided to check_no_control_chars!" >&2
+    return 1
+  fi
+
+  check_variable_name "$1" || return 1
+  ## Capture via ${!1} (positional, unshadowable) BEFORE declaring the locals,
+  ## so a caller variable named like one of ours is not shadowed.
+  local strings_bsh_value="${!1}"
+  local strings_bsh_varname="$1"
+  local LC_ALL=C
+
+  if [[ "${strings_bsh_value}" =~ [[:cntrl:]] ]]; then
+    sanitize-echo --max-length "${STRINGS_BSH_REPORT_MAX}" -- "$0: ${FUNCNAME[0]}: Control character not allowed in variable '${strings_bsh_varname}'!" >&2
     return 1
   fi
 
@@ -561,6 +587,13 @@ string_bsh_tests() {
   run_test "one_line: rejects multi-line string" check_is_not_empty_and_only_one_line 1 test_value $'Hello\nWorld'
   run_test "one_line: accepts normal text" check_is_not_empty_and_only_one_line 0 test_value "Hello, World!"
   run_test "one_line: accepts text with surrounding spaces" check_is_not_empty_and_only_one_line 0 test_value "  Hello  "
+
+  run_test "no_control_chars: accepts empty" check_no_control_chars 0 test_value ""
+  run_test "no_control_chars: accepts comma-separated layouts" check_no_control_chars 0 test_value "us,de,cz"
+  run_test "no_control_chars: accepts option with colon" check_no_control_chars 0 test_value "grp:alt_shift_toggle"
+  run_test "no_control_chars: rejects embedded newline" check_no_control_chars 1 test_value $'us\nde'
+  run_test "no_control_chars: rejects tab" check_no_control_chars 1 test_value $'us\tde'
+  run_test "no_control_chars: rejects carriage return" check_no_control_chars 1 test_value $'us\rde'
 
   ## check_valid_linux_user_account_name tests
   ## Regex: ^[a-zA-Z_][a-zA-Z0-9_-]*\$?$ (SYS_NAME_REGEX)
