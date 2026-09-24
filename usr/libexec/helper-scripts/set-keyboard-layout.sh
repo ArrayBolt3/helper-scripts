@@ -396,7 +396,10 @@ set_labwc_keymap() {
     ## overwrite; restore it so a failed overwrite does not orphan (lose) the
     ## user's existing config.
     if [ -n "${labwc_config_bak_path}" ]; then
-      if ! mv -- "${labwc_config_bak_path}" "${labwc_config_path}" ; then
+      ## --no-target-directory: restore to the exact path name. A plain 'mv'
+      ## would move the backup INTO a directory if a concurrent process replaced
+      ## the config path with one, orphaning the config; fail loudly instead.
+      if ! mv --no-target-directory -- "${labwc_config_bak_path}" "${labwc_config_path}" ; then
         log error "${FUNCNAME[0]}: Also failed to restore backup 'labwc' environment config from '${labwc_config_bak_path}' to '${labwc_config_path}'!"
       fi
     fi
@@ -442,7 +445,9 @@ set_labwc_keymap() {
   ## configuration back (or just delete the new config file if there wasn't an
   ## old config file).
   if [ -n "${labwc_config_bak_path}" ]; then
-    if ! mv -- "${labwc_config_bak_path}" "${labwc_config_path}" ; then
+    ## --no-target-directory: restore to the exact path name, never move the
+    ## backup into a directory left at the config path by a concurrent process.
+    if ! mv --no-target-directory -- "${labwc_config_bak_path}" "${labwc_config_path}" ; then
       log error "${FUNCNAME[0]}: Cannot move backup 'labwc' environment config '${labwc_config_bak_path}' to original location '${labwc_config_path}'!"
       return 1
     fi
