@@ -419,7 +419,10 @@ gpg_bash_lib_function_displaytime() {
   local T Y D H M S sep
   T="${1-0}"
 
-  if ! is_whole_number "${T}"; then
+  ## Bound the magnitude: a value over INT64_MAX passes a plain whole-number
+  ## check but then overflows (wraps) in the '$(( ))' arithmetic below, giving a
+  ## garbage duration. Reject it to the safe 0 fallback instead.
+  if ! is_whole_number_int64 "${T}"; then
     T=0
   fi
 
