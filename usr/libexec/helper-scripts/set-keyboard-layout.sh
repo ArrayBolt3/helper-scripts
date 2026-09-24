@@ -392,6 +392,14 @@ set_labwc_keymap() {
   ## Write the new config file contents and load them into 'labwc'.
   if ! overwrite "${labwc_config_path}" "${labwc_env_file_string}" >/dev/null ; then
     log error "${FUNCNAME[0]}: Cannot write new 'labwc' environment config '${labwc_config_path}'!"
+    ## In the '--no-persist' path the original config was moved to a backup
+    ## before the overwrite. Restore it so a failed overwrite does not orphan
+    ## (lose) the user's existing config.
+    if [ -n "${labwc_config_bak_path}" ]; then
+      if ! mv -- "${labwc_config_bak_path}" "${labwc_config_path}" ; then
+        log error "${FUNCNAME[0]}: Also failed to restore backup 'labwc' environment config from '${labwc_config_bak_path}' to '${labwc_config_path}'!"
+      fi
+    fi
     return 1
   fi
 
@@ -1189,6 +1197,25 @@ unknown_option_error() {
   exit 1
 }
 
+## Reject control characters (newline, tab, NUL, etc.) in layout arguments.
+## The layout / variant / option args are written verbatim into config files
+## ('/etc/default/keyboard', the 'labwc' environment file). An embedded newline
+## would inject a stray line into the written config, corrupting it. The
+## per-token validators split their check strings on newlines, so individually
+## valid tokens smuggled via an embedded newline can otherwise pass validation.
+## This is the untrusted CLI / D-Bus argument vector; the interactive UI reads a
+## single line via 'read' and so cannot carry a newline.
+reject_control_chars_in_args() {
+  local arg
+  for arg in "$@"; do
+    if [[ "${arg}" == *[[:cntrl:]]* ]]; then
+      log error "${FUNCNAME[0]}: Control characters (newline, tab, etc.) are not allowed in keyboard layout arguments!"
+      return 1
+    fi
+  done
+  return 0
+}
+
 parse_cmd() {
   while [ -n "${1:-}" ]; do
     case "$1" in
@@ -1271,6 +1298,8 @@ parse_cmd() {
   ## global args
   args=( "$@" )
   true "${FUNCNAME[0]}: args: ${args[*]}"
+
+  reject_control_chars_in_args "${args[@]}" || return 1
 
   if [ "${do_build_all_grub_keymaps}" = "true" ]; then
     ## Build all GRUB keymaps if requested.
