@@ -15,9 +15,13 @@
 ## 2: Vulnerable keys are present and user intervention is required to delete
 ##    them.
 
-## provides was_executed
+## provides was_executed; a failed load must abort LOUDLY in every invocation mode
+## (a 'bash <script>' call ignores the shebang -e), never silently skip main().
 # shellcheck source=./check_runtime.bsh
-source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/check_runtime.bsh
+if ! source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/check_runtime.bsh; then
+  printf '%s\n' "$0: ERROR: cannot source check_runtime.bsh (set HELPER_SCRIPTS_PATH)" >&2
+  exit 1
+fi
 # shellcheck source=../../sbin/shim-signed-mok-setup
 source "${HELPER_SCRIPTS_PATH:-}"/usr/sbin/shim-signed-mok-setup
 # shellcheck source=./has.bsh
