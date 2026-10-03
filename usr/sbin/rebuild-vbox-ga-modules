@@ -17,33 +17,15 @@
 ## MOK is enrolled (exactly like the DKMS modules). No-op when the Guest Additions
 ## are not installed (bare metal, non-VirtualBox).
 
+## provides was_executed
 # shellcheck source=../libexec/helper-scripts/check_runtime.bsh
 source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/check_runtime.bsh
-
-if was_executed "${BASH_SOURCE[0]}"; then
-  rebuild_vbox_ga_modules_sourced='false'
-else
-  rebuild_vbox_ga_modules_sourced='true'
-fi
-
-if [ "${rebuild_vbox_ga_modules_sourced}" = 'false' ]; then
-  set -o errexit
-  set -o nounset
-  set -o errtrace
-  set -o pipefail
-  shopt -s inherit_errexit
-  shopt -s shift_verbose
-  export LC_ALL=C
-
-  # shellcheck source=../libexec/helper-scripts/log_run_die.sh
-  source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/log_run_die.sh
-
-  # shellcheck source=../libexec/helper-scripts/as_root.sh
-  source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/as_root.sh
-
-  # shellcheck source=../libexec/helper-scripts/has.bsh
-  source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/has.bsh
-fi
+# shellcheck source=../libexec/helper-scripts/log_run_die.sh
+source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/log_run_die.sh
+# shellcheck source=../libexec/helper-scripts/as_root.sh
+source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/as_root.sh
+# shellcheck source=../libexec/helper-scripts/has.bsh
+source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/has.bsh
 
 rebuild_vbox_ga_modules() {
   as_root
@@ -64,6 +46,18 @@ rebuild_vbox_ga_modules() {
   log notice "Successfully rebuilt + signed VirtualBox Guest Additions kernel modules."
 }
 
-if [ "${rebuild_vbox_ga_modules_sourced}" = 'false' ]; then
+main() {
+  set -o errexit
+  set -o nounset
+  set -o pipefail
+  set -o errtrace
+  shopt -s inherit_errexit
+  shopt -s shift_verbose
+  export LC_ALL=C
+
   rebuild_vbox_ga_modules
+}
+
+if was_executed "${BASH_SOURCE[0]}"; then
+  main "$@"
 fi
