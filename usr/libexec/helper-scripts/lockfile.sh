@@ -38,12 +38,18 @@ if [ -L "${flocker_temp_folder}" ]; then
   exit 1
 fi
 
-## Wrap-mode setup: an EXECUTED run with arguments treats $1 as the lock key and
-## runs the rest as a command under that key's lock (the run happens on the
-## locked pass, below). A SOURCED use (BASH_SOURCE != $0) or an executed no-arg
-## dev run leaves this off, keeping the self-lock behaviour below.
+## Wrap-mode setup: an EXECUTED run of THIS file with arguments treats $1 as the
+## lock key and runs the rest as a command under that key's lock (the run happens
+## on the locked pass, below). Three conditions must all hold so that wrap mode
+## does NOT mis-fire for:
+##   - a SOURCED use (BASH_SOURCE[0] != $0), the historical self-lock, or
+##   - an INLINED copy of this body pasted into another executed script (e.g. the
+##     dist-installer-cli standalone generator). An inlined host runs this at the
+##     host's own top level, where BASH_SOURCE[0] == $0, so the basename check is
+##     what keeps wrap mode off: BASH_SOURCE[0] is then the HOST's path, whose
+##     basename is not 'lockfile.sh', and the host keeps the self-lock behaviour.
 lockfile_wrap="no"
-if [ "${BASH_SOURCE[0]}" = "${0}" ] && [ "${#}" -ge 1 ]; then
+if [ "${BASH_SOURCE[0]}" = "${0}" ] && [ "${BASH_SOURCE[0]##*/}" = "lockfile.sh" ] && [ "${#}" -ge 1 ]; then
   lockfile_wrap="yes"
   LOCK_NAME="${1}"
 fi
