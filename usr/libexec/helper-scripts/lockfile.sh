@@ -31,11 +31,18 @@ true "${BASH_SOURCE[0]}: INFO: FLOCKER: ${FLOCKER-}"
 ## a 1777 dir under /run), where another user could pre-plant a symlink. The checks
 ## below enforce that property on whichever base is used: a real directory, owned by
 ## this user, not a symlink.
+## The runtime dir is used only when it is a real directory, not a symlink, AND
+## owned by this user; otherwise (no session, or an inherited XDG_RUNTIME_DIR that
+## points at another user's /run/user, e.g. under 'sudo -u') fall through to the
+## cache dir rather than hard-exiting.
 flocker_runtime_dir="${XDG_RUNTIME_DIR:-/run/user/${EUID}}"
-if [ -d "${flocker_runtime_dir}" ] && [ ! -L "${flocker_runtime_dir}" ]; then
+if [ -d "${flocker_runtime_dir}" ] && [ ! -L "${flocker_runtime_dir}" ] && [ -O "${flocker_runtime_dir}" ]; then
   flocker_base="${flocker_runtime_dir}"
 else
-  flocker_base="${XDG_CACHE_HOME:-${HOME}/.cache}"
+  ## ${HOME:-} not ${HOME}: a sourcing caller may run under 'set -o nounset', where
+  ## an unset HOME would abort with 'unbound variable' instead of the clear error
+  ## below (both unset -> '/.cache', which the ownership check then rejects cleanly).
+  flocker_base="${XDG_CACHE_HOME:-${HOME:-}/.cache}"
   mkdir --parents -- "${flocker_base}" 2>/dev/null || true
 fi
 if [ ! -d "${flocker_base}" ] || [ -L "${flocker_base}" ] || [ ! -O "${flocker_base}" ]; then
