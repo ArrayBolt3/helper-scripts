@@ -38,18 +38,21 @@ if [ -L "${flocker_temp_folder}" ]; then
   exit 1
 fi
 
-## Wrap-mode setup: an EXECUTED run of THIS file with arguments treats $1 as the
-## lock key and runs the rest as a command under that key's lock (the run happens
-## on the locked pass, below). Three conditions must all hold so that wrap mode
-## does NOT mis-fire for:
-##   - a SOURCED use (BASH_SOURCE[0] != $0), the historical self-lock, or
-##   - an INLINED copy of this body pasted into another executed script (e.g. the
-##     dist-installer-cli standalone generator). An inlined host runs this at the
-##     host's own top level, where BASH_SOURCE[0] == $0, so the basename check is
-##     what keeps wrap mode off: BASH_SOURCE[0] is then the HOST's path, whose
-##     basename is not 'lockfile.sh', and the host keeps the self-lock behaviour.
+## Wrap-mode setup: an EXECUTED run of THIS file with arguments DERIVES the lock
+## key from $1 and runs the rest as a command under that key's lock (the run
+## happens on the locked pass, below). It triggers only when a key is NOT already
+## chosen (LOCK_NAME unset), because wrap mode's whole job is to derive the key;
+## if one is set the caller is self-locking, not wrapping. That single test keeps
+## wrap mode off for both ways the body runs without being the wrap CLI:
+##   - a SOURCED use (BASH_SOURCE[0] != $0), the historical self-lock, and
+##   - an INLINED copy pasted into another executed script (e.g. the
+##     dist-installer-cli standalone generator), where BASH_SOURCE[0] == $0 at the
+##     host's top level: such a host sets LOCK_NAME to its own key, which both
+##     fixes its lock file and suppresses wrap mode here. Unlike a basename check,
+##     this still lets wrap mode run when lockfile.sh is invoked under a symlink or
+##     a different name (no silent no-op of the wrapped command).
 lockfile_wrap="no"
-if [ "${BASH_SOURCE[0]}" = "${0}" ] && [ "${BASH_SOURCE[0]##*/}" = "lockfile.sh" ] && [ "${#}" -ge 1 ]; then
+if [ "${BASH_SOURCE[0]}" = "${0}" ] && [ -z "${LOCK_NAME-}" ] && [ "${#}" -ge 1 ]; then
   lockfile_wrap="yes"
   LOCK_NAME="${1}"
 fi
