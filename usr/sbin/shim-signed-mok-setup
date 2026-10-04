@@ -3,11 +3,10 @@
 ## Copyright (C) 2019 - 2025 ENCRYPTED SUPPORT LLC <adrelanos@whonix.org>
 ## See the file COPYING for copying conditions.
 
-## provides was_executed; a failed load must abort LOUDLY in every invocation mode
-## (a 'bash <script>' call ignores the shebang -e), never silently skip main().
+## provides was_executed
 # shellcheck source=../libexec/helper-scripts/check_runtime.bsh
 if ! source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/check_runtime.bsh; then
-  printf '%s\n' "$0: ERROR: cannot source check_runtime.bsh (set HELPER_SCRIPTS_PATH)" >&2
+  printf '%s\n' "$0: ERROR: cannot source check_runtime.bsh" >&2
   exit 1
 fi
 
@@ -36,17 +35,13 @@ if [ "${shim_signed_mok_setup_sourced}" = 'false' ]; then
   source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/has.bsh
 fi
 
-## Base dirs are top-level globals carrying the literal production defaults, so a
-## unit test that sources this file can point them at a temp tree before calling
-## dkms_mok_variables_set. No env indirection: production is byte-identical.
-dkms_mok_dir='/var/lib/dkms'
-shim_mok_dir='/var/lib/shim-signed/mok'
-
 dkms_mok_variables_set() {
   ## NOTE: This function is 'source'ed by other scripts. It should stay simple.
   ##       I.e. it should not depend to 'source' other scripts.
+  dkms_mok_dir="${SHIM_SIGNED_MOK_SETUP_DKMS_MOK_DIR:-}/var/lib/dkms"
   dkms_mok_public_file="${dkms_mok_dir}/mok.pub"
   dkms_mok_private_file="${dkms_mok_dir}/mok.key"
+  shim_mok_dir="${SHIM_SIGNED_MOK_SETUP_DKMS_MOK_DIR:-}/var/lib/shim-signed/mok"
   shim_mok_public_file="${shim_mok_dir}/MOK.der"
   shim_mok_private_file="${shim_mok_dir}/MOK.priv"
 }

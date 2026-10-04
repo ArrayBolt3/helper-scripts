@@ -15,11 +15,10 @@
 ## 2: Vulnerable keys are present and user intervention is required to delete
 ##    them.
 
-## provides was_executed; a failed load must abort LOUDLY in every invocation mode
-## (a 'bash <script>' call ignores the shebang -e), never silently skip main().
+## provides was_executed
 # shellcheck source=./check_runtime.bsh
 if ! source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/check_runtime.bsh; then
-  printf '%s\n' "$0: ERROR: cannot source check_runtime.bsh (set HELPER_SCRIPTS_PATH)" >&2
+  printf '%s\n' "$0: ERROR: cannot source check_runtime.bsh" >&2
   exit 1
 fi
 # shellcheck source=../../sbin/shim-signed-mok-setup
@@ -29,22 +28,10 @@ source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/has.bsh
 # shellcheck source=./secure_boot_enabled_check.bsh
 source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/secure_boot_enabled_check.bsh
 
-## Marker and EFI-sysfs paths are top-level globals carrying the literal
-## production defaults, so a unit test that sources this file can redirect them to
-## a temp tree. The dkms key paths come from dkms_mok_variables_set (dkms_mok_dir
-## in shim-signed-mok-setup). No env indirection: production is byte-identical.
 legacy_dist_do_once_dir='/var/lib/legacy-dist/do_once'
 efi_sysfs_dir='/sys/firmware/efi'
 
 check_image_builtin_mok() {
-  ## A deliberately set-up MOK (by the installer's opt-in Secure Boot MOK step,
-  ## or a user via shim-manage-mok) is a PER-MACHINE key, not the vulnerable
-  ## image-builtin key this check hunts for. The responsible tool drops this
-  ## marker to declare the key legitimate, so never flag or wipe it.
-  if [ -f "${legacy_dist_do_once_dir}/mok-ok" ]; then
-    return 0
-  fi
-
   ## Where to put the do_once file? helper-scripts is intended for
   ## non-intrusive code, so having a do_once directory for helper-scripts
   ## seems out of place. systemcheck is not guaranteed to be installed, so
