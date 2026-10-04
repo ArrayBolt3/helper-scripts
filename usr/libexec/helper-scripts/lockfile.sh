@@ -23,18 +23,29 @@ true "${BASH_SOURCE[0]}: START"
 
 true "${BASH_SOURCE[0]}: INFO: FLOCKER: ${FLOCKER-}"
 
-## No fallback outside of /run/user/EUID by design. A fallback such as /tmp or
-## a 1777 root:root dir under /run would introduce TOCTOU issues.
+## Lock dir lives under the per-user runtime dir. When there is no logind session
+## (root via 'su -', a container, a chroot, 'sudo -u user', ssh without pam_systemd)
+## /run/user/EUID does not exist, so fall back to the per-user CACHE dir. Both are
+## owned by this user and NOT world-writable, which is the anti-TOCTOU property that
+## matters -- the fallbacks rejected by design are SHARED world-writable dirs (/tmp,
+## a 1777 dir under /run), where another user could pre-plant a symlink. The checks
+## below enforce that property on whichever base is used: a real directory, owned by
+## this user, not a symlink.
 flocker_runtime_dir="${XDG_RUNTIME_DIR:-/run/user/${EUID}}"
 if [ -d "${flocker_runtime_dir}" ] && [ ! -L "${flocker_runtime_dir}" ]; then
-  flocker_temp_folder="${flocker_runtime_dir}/flocker-temp-folder"
+  flocker_base="${flocker_runtime_dir}"
 else
-  printf '%s\n' "$0: ERROR: no per-user runtime dir, cannot create a lock directory!" 1>&2
+  flocker_base="${XDG_CACHE_HOME:-${HOME}/.cache}"
+  mkdir --parents -- "${flocker_base}" 2>/dev/null || true
+fi
+if [ ! -d "${flocker_base}" ] || [ -L "${flocker_base}" ] || [ ! -O "${flocker_base}" ]; then
+  printf '%s\n' "$0: ERROR: no usable per-user lock directory ('${flocker_base}' must be a directory you own and not a symlink)!" 1>&2
   exit 1
 fi
+flocker_temp_folder="${flocker_base}/flocker-temp-folder"
 mkdir --parents -- "${flocker_temp_folder}"
-if [ -L "${flocker_temp_folder}" ]; then
-  printf '%s\n' "$0: ERROR: refusing unexpected symlink at lock directory location '${flocker_temp_folder}'!" 1>&2
+if [ -L "${flocker_temp_folder}" ] || [ ! -O "${flocker_temp_folder}" ]; then
+  printf '%s\n' "$0: ERROR: refusing unexpected symlink or non-owned directory at lock directory location '${flocker_temp_folder}'!" 1>&2
   exit 1
 fi
 
