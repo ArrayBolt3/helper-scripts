@@ -3,11 +3,10 @@
 ## Copyright (C) 2025 - 2025 ENCRYPTED SUPPORT LLC <adrelanos@whonix.org>
 ## See the file COPYING for copying conditions.
 
-## provides was_executed; a failed load must abort LOUDLY in every invocation mode
-## (a 'bash <script>' call ignores the shebang -e), never silently skip main().
+## provides was_executed
 # shellcheck source=../libexec/helper-scripts/check_runtime.bsh
 if ! source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/check_runtime.bsh; then
-  printf '%s\n' "$0: ERROR: cannot source check_runtime.bsh (set HELPER_SCRIPTS_PATH)" >&2
+  printf '%s\n' "$0: ERROR: cannot source check_runtime.bsh" >&2
   exit 1
 fi
 
@@ -79,9 +78,6 @@ dev_mode="false"
 non_interactive="false"
 manage_mode="none"
 
-## EFI-sysfs and Qubes marker paths are top-level globals carrying the literal
-## production defaults, so a unit test that sources this file can redirect them to
-## a temp tree. No env indirection: production is byte-identical.
 efi_sysfs_dir='/sys/firmware/efi'
 qubes_marker_file='/usr/share/qubes/marker-vm'
 
@@ -378,6 +374,8 @@ main() {
 
   trap exit_function EXIT
 
+  ## Set by parse_cmdline, inherited by shim_manage_mok.
+  local non_interactive manage_mode dev_mode
   parse_cmdline "$@"
   shim_manage_mok
 }

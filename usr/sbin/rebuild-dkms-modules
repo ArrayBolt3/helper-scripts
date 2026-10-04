@@ -3,8 +3,13 @@
 ## Copyright (C) 2026 - 2026 ENCRYPTED SUPPORT LLC <adrelanos@whonix.org>
 ## See the file COPYING for copying conditions.
 
-## provides was_executed; a failed load must abort LOUDLY in every invocation mode
-## (a 'bash <script>' call ignores the shebang -e), never silently skip main().
+## FIXME: This script exists mainly so that DKMS modules can be signed as part
+## of the rebuild process. The rebuild is redundant however, it would be much
+## more efficient if we could just sign the modules. Adjust this script so that
+## it signs only. Try to also add functionality that will sign VirtualBox
+## modules along with DKMS modules.
+
+## provides was_executed
 # shellcheck source=../libexec/helper-scripts/check_runtime.bsh
 if ! source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/check_runtime.bsh; then
   printf '%s\n' "$0: ERROR: cannot source check_runtime.bsh (set HELPER_SCRIPTS_PATH)" >&2
