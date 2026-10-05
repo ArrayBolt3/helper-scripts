@@ -9,7 +9,8 @@
 true "$0: START"
 
 # shellcheck source=./check_runtime.bsh
-if ! source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/check_runtime.bsh ; then
+source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/check_runtime.bsh || true
+if ! declare -F was_executed >/dev/null; then
   printf '%s\n' "$0: ERROR: cannot source check_runtime.bsh!" >&2
   exit 1
 fi
