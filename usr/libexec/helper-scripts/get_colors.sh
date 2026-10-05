@@ -5,13 +5,12 @@
 
 ## style-ok: no-strict - sourced library.
 
-## Source check_runtime.bsh on its OWN leading 'source' line so a standalone
-## generator that inlines this file (build-dist-installer-cli) can inline it too --
-## an 'if ! source' guard is not inlinable and would leave the standalone depending
-## on helper-scripts at runtime. Guard a missing file via a post-source check of
-## was_executed (defined by check_runtime.bsh).
+## Source and check have to be done separately for the sake of
+## dist-installer-cli.
+##
+## TODO: Consider using this form of the check_runtime guard everywhere.
 # shellcheck source=./check_runtime.bsh
-source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/check_runtime.bsh 2>/dev/null || true
+source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/check_runtime.bsh
 if ! declare -F was_executed >/dev/null; then
   printf '%s\n' "$0: ERROR: cannot source check_runtime.bsh!" >&2
   exit 1
