@@ -12,6 +12,13 @@
 ## NOTE: Must not include bashisms!
 
 ## NOTE: code duplication: Function pkg_installed is duplicated elsewhere in derivative-maker source code.
+
+## Contract: tests the dpkg WANT flag (field 1 of '${Status}', the requested
+## selection), NOT the actual install state (field 3). Consequences:
+##  - want 'install' returns 0 even when the state is half-installed / unpacked /
+##    config-files (present per policy, but not necessarily usable).
+##  - a held-but-installed package (want 'hold') returns 1 although it is installed.
+## Callers needing "usable right now" must inspect the state field themselves.
 pkg_installed() {
    ## 'local' does not break 'sh'.
    local package_name dpkg_query_output

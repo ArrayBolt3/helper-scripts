@@ -23,27 +23,54 @@ true "${BASH_SOURCE[0]}: START"
 
 true "${BASH_SOURCE[0]}: INFO: FLOCKER: ${FLOCKER-}"
 
-## No fallback outside of /run/user/EUID by design. A fallback such as /tmp or
-## a 1777 root:root dir under /run would introduce TOCTOU issues.
+## Lock dir lives under the per-user runtime dir. When there is no logind session
+## (root via 'su -', a container, a chroot, 'sudo -u user', ssh without pam_systemd)
+## /run/user/EUID does not exist, so fall back to the per-user CACHE dir. Both are
+## owned by this user and NOT world-writable, which is the anti-TOCTOU property that
+## matters -- the fallbacks rejected by design are SHARED world-writable dirs (/tmp,
+## a 1777 dir under /run), where another user could pre-plant a symlink. The checks
+## below enforce that property on whichever base is used: a real directory, owned by
+## this user, not a symlink.
+## The runtime dir is used only when it is a real directory, not a symlink, AND
+## owned by this user; otherwise (no session, or an inherited XDG_RUNTIME_DIR that
+## points at another user's /run/user, e.g. under 'sudo -u') fall through to the
+## cache dir rather than hard-exiting.
 flocker_runtime_dir="${XDG_RUNTIME_DIR:-/run/user/${EUID}}"
-if [ -d "${flocker_runtime_dir}" ] && [ ! -L "${flocker_runtime_dir}" ]; then
-  flocker_temp_folder="${flocker_runtime_dir}/flocker-temp-folder"
+if [ -d "${flocker_runtime_dir}" ] && [ ! -L "${flocker_runtime_dir}" ] && [ -O "${flocker_runtime_dir}" ]; then
+  flocker_base="${flocker_runtime_dir}"
 else
-  printf '%s\n' "$0: ERROR: no per-user runtime dir, cannot create a lock directory!" 1>&2
+  ## ${HOME:-} not ${HOME}: a sourcing caller may run under 'set -o nounset', where
+  ## an unset HOME would abort with 'unbound variable' instead of the clear error
+  ## below (both unset -> '/.cache', which the ownership check then rejects cleanly).
+  flocker_base="${XDG_CACHE_HOME:-${HOME:-}/.cache}"
+  mkdir --parents -- "${flocker_base}" 2>/dev/null || true
+fi
+if [ ! -d "${flocker_base}" ] || [ -L "${flocker_base}" ] || [ ! -O "${flocker_base}" ]; then
+  printf '%s\n' "$0: ERROR: no usable per-user lock directory ('${flocker_base}' must be a directory you own and not a symlink)!" 1>&2
   exit 1
 fi
+flocker_temp_folder="${flocker_base}/flocker-temp-folder"
 mkdir --parents -- "${flocker_temp_folder}"
-if [ -L "${flocker_temp_folder}" ]; then
-  printf '%s\n' "$0: ERROR: refusing unexpected symlink at lock directory location '${flocker_temp_folder}'!" 1>&2
+if [ -L "${flocker_temp_folder}" ] || [ ! -O "${flocker_temp_folder}" ]; then
+  printf '%s\n' "$0: ERROR: refusing unexpected symlink or non-owned directory at lock directory location '${flocker_temp_folder}'!" 1>&2
   exit 1
 fi
 
-## Wrap-mode setup: an EXECUTED run with arguments treats $1 as the lock key and
-## runs the rest as a command under that key's lock (the run happens on the
-## locked pass, below). A SOURCED use (BASH_SOURCE != $0) or an executed no-arg
-## dev run leaves this off, keeping the self-lock behaviour below.
+## Wrap-mode setup: an EXECUTED run of THIS file with arguments DERIVES the lock
+## key from $1 and runs the rest as a command under that key's lock (the run
+## happens on the locked pass, below). It triggers only when a key is NOT already
+## chosen (LOCK_NAME unset), because wrap mode's whole job is to derive the key;
+## if one is set the caller is self-locking, not wrapping. That single test keeps
+## wrap mode off for both ways the body runs without being the wrap CLI:
+##   - a SOURCED use (BASH_SOURCE[0] != $0), the historical self-lock, and
+##   - an INLINED copy pasted into another executed script (e.g. the
+##     dist-installer-cli standalone generator), where BASH_SOURCE[0] == $0 at the
+##     host's top level: such a host sets LOCK_NAME to its own key, which both
+##     fixes its lock file and suppresses wrap mode here. Unlike a basename check,
+##     this still lets wrap mode run when lockfile.sh is invoked under a symlink or
+##     a different name (no silent no-op of the wrapped command).
 lockfile_wrap="no"
-if [ "${BASH_SOURCE[0]}" = "${0}" ] && [ "${#}" -ge 1 ]; then
+if [ "${BASH_SOURCE[0]}" = "${0}" ] && [ -z "${LOCK_NAME-}" ] && [ "${#}" -ge 1 ]; then
   lockfile_wrap="yes"
   LOCK_NAME="${1}"
 fi
