@@ -5,8 +5,6 @@
 
 ## style-ok: no-strict - sourced library.
 
-## Bare 'source' on its own line so build-dist-installer-cli can inline this file
-## into the dist-installer-cli standalone (an 'if ! source' guard is not inlinable).
 # shellcheck source=./check_runtime.bsh
 source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/check_runtime.bsh || true
 if ! declare -F was_executed >/dev/null; then
