@@ -5,12 +5,10 @@
 
 ## style-ok: no-strict - sourced library.
 
-## Source and check have to be done separately for the sake of
-## dist-installer-cli.
-##
-## TODO: Consider using this form of the check_runtime guard everywhere.
+## Bare 'source' on its own line so build-dist-installer-cli can inline this file
+## into the dist-installer-cli standalone (an 'if ! source' guard is not inlinable).
 # shellcheck source=./check_runtime.bsh
-source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/check_runtime.bsh
+source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/check_runtime.bsh || true
 if ! declare -F was_executed >/dev/null; then
   printf '%s\n' "$0: ERROR: cannot source check_runtime.bsh!" >&2
   exit 1
