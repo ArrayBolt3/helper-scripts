@@ -85,6 +85,18 @@ if [ "${FLOCKER-}" != "${0}" ]; then
   ## script) inherits the fd and pins the lock. The 'flock' parent keeps its own
   ## fd and holds the lock for the whole command lifetime, releasing it the
   ## moment the command exits.
+  ##
+  ## Re-exec a PATH, not the bare "${0}": 'flock' uses execvp, so a bare invoked
+  ## name (e.g. 'bash dist-installer-cli' run from its own directory) would be
+  ## searched on PATH and fail with "failed to execute". Make it absolute when
+  ## "${0}" names an existing file, WITHOUT resolving symlinks so an invoked-as-
+  ## symlink name (e.g. virtualbox-installer-cli) keeps its identity; otherwise
+  ## leave it for PATH lookup, which is how an installed command resolves itself.
+  if [ -e "${0}" ]; then
+    flocker_self="$(realpath --no-symlinks -- "${0}")"
+  else
+    flocker_self="${0}"
+  fi
   if test -o xtrace; then
     ## Code duplication. Also in xtrace.bsh function shellopts_with_xtrace.
     ## This helper intentionally avoids sourcing dependencies.
@@ -97,9 +109,9 @@ if [ "${FLOCKER-}" != "${0}" ]; then
         flocker_shellopts="${SHELLOPTS-}:xtrace"
         ;;
     esac
-    exec env SHELLOPTS="${flocker_shellopts}" FLOCKER="${0}" flock --close --exclusive --nonblock "${flocker_lockfile}" "${0}" "${@}"
+    exec env SHELLOPTS="${flocker_shellopts}" FLOCKER="${flocker_self}" flock --close --exclusive --nonblock "${flocker_lockfile}" "${flocker_self}" "${@}"
   else
-    exec env FLOCKER="${0}" flock --close --exclusive --nonblock "${flocker_lockfile}" "${0}" "${@}"
+    exec env FLOCKER="${flocker_self}" flock --close --exclusive --nonblock "${flocker_lockfile}" "${flocker_self}" "${@}"
   fi
   ## Never reached due to 'exec' above.
 fi
