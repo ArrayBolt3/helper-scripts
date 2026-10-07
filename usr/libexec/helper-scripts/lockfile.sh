@@ -86,17 +86,13 @@ if [ "${FLOCKER-}" != "${0}" ]; then
   ## fd and holds the lock for the whole command lifetime, releasing it the
   ## moment the command exits.
   ##
-  ## Re-exec a PATH, not the bare "${0}": 'flock' uses execvp, so a bare invoked
-  ## name (e.g. 'bash dist-installer-cli' run from its own directory) would be
-  ## searched on PATH and fail with "failed to execute". Make it absolute when
-  ## "${0}" names an existing file, WITHOUT resolving symlinks so an invoked-as-
-  ## symlink name (e.g. virtualbox-installer-cli) keeps its identity; otherwise
-  ## leave it for PATH lookup, which is how an installed command resolves itself.
-  if [ -e "${0}" ]; then
-    flocker_self="$(realpath --no-symlinks -- "${0}")"
-  else
-    flocker_self="${0}"
-  fi
+  ## "${0}" is passed to flock's execvp verbatim: a path with a slash runs that
+  ## exact file (the kernel-resolved one, symlinks intact); a bare name is PATH-
+  ## searched. Do NOT pre-resolve it -- 'realpath' follows/collapses symlinks and
+  ## '..' lexically (re-exec'ing a DIFFERENT file than the kernel ran), and a
+  ## cwd-relative rewrite could run an attacker's same-named file under the
+  ## caller's privileges. A self-locking script invoked by a bare name that is not
+  ## on PATH must therefore be run via a path (e.g. './script').
   if test -o xtrace; then
     ## Code duplication. Also in xtrace.bsh function shellopts_with_xtrace.
     ## This helper intentionally avoids sourcing dependencies.
@@ -109,9 +105,9 @@ if [ "${FLOCKER-}" != "${0}" ]; then
         flocker_shellopts="${SHELLOPTS-}:xtrace"
         ;;
     esac
-    exec env SHELLOPTS="${flocker_shellopts}" FLOCKER="${flocker_self}" flock --close --exclusive --nonblock "${flocker_lockfile}" "${flocker_self}" "${@}"
+    exec env SHELLOPTS="${flocker_shellopts}" FLOCKER="${0}" flock --close --exclusive --nonblock "${flocker_lockfile}" "${0}" "${@}"
   else
-    exec env FLOCKER="${flocker_self}" flock --close --exclusive --nonblock "${flocker_lockfile}" "${flocker_self}" "${@}"
+    exec env FLOCKER="${0}" flock --close --exclusive --nonblock "${flocker_lockfile}" "${0}" "${@}"
   fi
   ## Never reached due to 'exec' above.
 fi
