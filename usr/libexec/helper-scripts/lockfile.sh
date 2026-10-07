@@ -80,6 +80,11 @@ if [ "${FLOCKER-}" != "${0}" ]; then
   ## But if we were to use '--verbose' below, then 'flock' would always add verbose
   ## output even in case it was possible to acquire a lock.
 
+  ## '--close' closes the lock fd in the exec'd command, so neither the command
+  ## nor any detached child it spawns (e.g. a backgrounded GUI that outlives the
+  ## script) inherits the fd and pins the lock. The 'flock' parent keeps its own
+  ## fd and holds the lock for the whole command lifetime, releasing it the
+  ## moment the command exits.
   if test -o xtrace; then
     ## Code duplication. Also in xtrace.bsh function shellopts_with_xtrace.
     ## This helper intentionally avoids sourcing dependencies.
@@ -92,9 +97,9 @@ if [ "${FLOCKER-}" != "${0}" ]; then
         flocker_shellopts="${SHELLOPTS-}:xtrace"
         ;;
     esac
-    exec env SHELLOPTS="${flocker_shellopts}" FLOCKER="${0}" flock --exclusive --nonblock "${flocker_lockfile}" "${0}" "${@}"
+    exec env SHELLOPTS="${flocker_shellopts}" FLOCKER="${0}" flock --close --exclusive --nonblock "${flocker_lockfile}" "${0}" "${@}"
   else
-    exec env FLOCKER="${0}" flock --exclusive --nonblock "${flocker_lockfile}" "${0}" "${@}"
+    exec env FLOCKER="${0}" flock --close --exclusive --nonblock "${flocker_lockfile}" "${0}" "${@}"
   fi
   ## Never reached due to 'exec' above.
 fi
