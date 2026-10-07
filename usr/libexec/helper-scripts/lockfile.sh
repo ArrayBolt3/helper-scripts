@@ -73,12 +73,18 @@ fi
 if [ "${FLOCKER-}" != "${0}" ]; then
   true "${BASH_SOURCE[0]}: INFO: FLOCKER set to self: no"
 
-  ## Using 'flock' with option '--verbose' but hiding stdout for the purpose of showing
-  ## 'flock: failed to get lock' error message, if applicable.
-  ## The error message is not perfectly atomic.
-  flock --verbose --exclusive --nonblock "${flocker_lockfile}" /usr/bin/true >/dev/null
-  ## But if we were to use '--verbose' below, then 'flock' would always add verbose
-  ## output even in case it was possible to acquire a lock.
+  ## Surface a clear 'already running' message when the lock is held. This probe is
+  ## cosmetic: the authoritative lock is the exec'd 'flock' below, which exits 75
+  ## (EX_TEMPFAIL, the conventional 'resource busy, retry later' code) on conflict.
+  ## Run under 'if' so a held lock cannot abort a strict-mode (errexit/errtrace)
+  ## sourcing caller via its ERR trap -- a bare failing 'flock' here would. The exec'd
+  ## 'flock' intentionally has no '--verbose' (which would print acquire noise on every
+  ## successful run), so the message lives here. Not perfectly atomic: another instance
+  ## could acquire between this probe's release and the exec's re-acquire, but the exec
+  ## then exits 75 regardless -- only the message races, never the exit code.
+  if ! flock --exclusive --nonblock "${flocker_lockfile}" /usr/bin/true 2>/dev/null; then
+    printf '%s\n' "${0}: another instance is already running; exiting." 1>&2
+  fi
 
   ## '--close' closes the lock fd in the exec'd command, so neither the command
   ## nor any detached child it spawns (e.g. a backgrounded GUI that outlives the
@@ -105,9 +111,9 @@ if [ "${FLOCKER-}" != "${0}" ]; then
         flocker_shellopts="${SHELLOPTS-}:xtrace"
         ;;
     esac
-    exec env SHELLOPTS="${flocker_shellopts}" FLOCKER="${0}" flock --close --exclusive --nonblock "${flocker_lockfile}" "${0}" "${@}"
+    exec env SHELLOPTS="${flocker_shellopts}" FLOCKER="${0}" flock --conflict-exit-code 75 --close --exclusive --nonblock "${flocker_lockfile}" "${0}" "${@}"
   else
-    exec env FLOCKER="${0}" flock --close --exclusive --nonblock "${flocker_lockfile}" "${0}" "${@}"
+    exec env FLOCKER="${0}" flock --conflict-exit-code 75 --close --exclusive --nonblock "${flocker_lockfile}" "${0}" "${@}"
   fi
   ## Never reached due to 'exec' above.
 fi
