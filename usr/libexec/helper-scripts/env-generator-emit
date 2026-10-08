@@ -1,0 +1,59 @@
+#!/bin/bash
+
+## Copyright (C) 2026 - 2026 ENCRYPTED SUPPORT LLC <adrelanos@whonix.org>
+## See the file COPYING for copying conditions.
+
+## style-ok: allow-errexit-toggle -- errexit/nounset are relaxed only while sourcing a
+## login-shell profile.d script (which references unset variables and may return
+## non-zero); this is not the rc-capture toggle R-011 targets.
+
+## systemd environment-generator adapter. Reused via a per-package symlink
+## /usr/lib/systemd/{user,system}-environment-generators/<NN_name> whose basename
+## matches /etc/profile.d/<NN_name>.sh.
+##
+## /etc/profile.d is sourced only by login shells, never by systemd services, so a
+## systemd-launched graphical session (for example a headless Wayland desktop started
+## as a --user service) does not get the environment those scripts export, such as the
+## XDG_CONFIG_DIRS entries that place /usr/share/<package>/ onto the config search path.
+##
+## This generator sources the matching profile.d script with its stdout DISCARDED (a
+## generator's stdout IS the KEY=VALUE environment protocol) and prints only the
+## environment variables it added or changed, so services inherit the same environment
+## as login shells.
+##
+## No per-variable denylist: a script is wired here only when it is already pure-env; it
+## is also symlinked into the non-interactive /etc/X11/Xsession.d path, so it cannot set
+## PS1, print, or depend on an interactive shell. The single stdout redirect covers the
+## one real difference from Xsession.d: a generator parses stdout, Xsession.d only logs
+## it.
+
+set -o errexit
+set -o nounset
+set -o pipefail
+set -o errtrace
+shopt -s inherit_errexit
+shopt -s shift_verbose
+export LC_ALL=C
+
+name="${0##*/}"
+script="/etc/profile.d/${name}.sh"
+
+if [ ! -r "${script}" ]; then
+   exit 0
+fi
+
+before="$(env | sort)"
+
+## The sourced profile.d script is written for login shells: it references variables
+## while unset and may return non-zero. Relax errexit/nounset only around sourcing.
+set +o errexit
+set +o nounset
+# shellcheck disable=SC1090
+. "${script}" >/dev/null 2>&1 || true
+set -o errexit
+set -o nounset
+
+after="$(env | sort)"
+
+## Emit NAME=VALUE lines that are new or changed versus before.
+comm -13 <(printf '%s\n' "${before}") <(printf '%s\n' "${after}") || true
