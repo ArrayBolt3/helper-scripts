@@ -26,6 +26,12 @@
 ## PS1, print, or depend on an interactive shell. The single stdout redirect covers the
 ## one real difference from Xsession.d: a generator parses stdout, Xsession.d only logs
 ## it.
+##
+## Boundary (a wired script stays within it by being pure-env + Xsession.d-safe):
+##  - Only ADDED or CHANGED variables are emitted, so an `unset` is NOT propagated.
+##  - The script must not `cd` (PWD/OLDPWD would be emitted), change PATH, `exit` (that
+##    would terminate the generator), or export a multi-line or non-UTF-8 value (systemd
+##    rejects a non-UTF-8 line and drops the whole generator pass). It runs under LC_ALL=C.
 
 set -o errexit
 set -o nounset
