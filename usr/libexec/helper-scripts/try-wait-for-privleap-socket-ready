@@ -89,10 +89,10 @@ main() {
    # shellcheck source=./light_sleep.bsh
    source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/light_sleep.bsh
 
-   ## Daemon first (fast, race-free where systemctl works); the socket poll below
-   ## is the creator-agnostic authoritative readiness gate.
-   "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/try-wait-for-privleapd-service-running || true
-
+   ## The socket poll is the complete, bounded readiness gate: a successful
+   ## connect implies privleapd is up AND this uid's socket is listening, so it
+   ## needs no separate daemon-state wait (try-wait-for-privleapd-service-running
+   ## is a standalone helper for callers that want only the daemon-up signal).
    try_wait_for_privleap_socket_ready
 }
 

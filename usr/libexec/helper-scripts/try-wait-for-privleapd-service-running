@@ -39,9 +39,9 @@ while (( delay_ctr < 120 )); do
       exit 0
    fi
    case "${privleapd_state}" in
-      *'LoadState=not-found'* | *'LoadState=masked'* | *'LoadState=error'*)
-         ## Unit cannot run (not installed / masked): do not wait it out,
-         ## otherwise a disabled privleapd stalls the caller for the full loop.
+      *'LoadState=not-found'* | *'LoadState=masked'* | *'LoadState=error'* | *'LoadState=bad-setting'*)
+         ## Unit cannot run (not installed / masked / unparsable): do not wait it
+         ## out, otherwise it stalls the caller for the full loop.
          break
          ;;
    esac
