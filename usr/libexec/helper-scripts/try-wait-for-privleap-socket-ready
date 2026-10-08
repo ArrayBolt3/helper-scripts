@@ -38,8 +38,27 @@ fi
 try_wait_for_privleap_socket_ready() {
    local delay_ctr max_ctr
    delay_ctr=0
+
+   ## Validate the (env-overridable) ceiling as a plain decimal BEFORE it ever
+   ## reaches arithmetic: an unvalidated value in (( )) is a bash
+   ## arithmetic-injection vector (array subscripts run command substitutions)
+   ## and an octal/overflow hazard. Anything non-numeric, empty, or absurdly
+   ## long falls back to the default.
    max_ctr="${privleap_socket_wait_max_ctr:-30}"
-   while (( delay_ctr < max_ctr )); do
+   case "${max_ctr}" in
+      '' | *[!0-9]* | [0-9][0-9][0-9][0-9][0-9]*)
+         max_ctr=30
+         ;;
+   esac
+   ## Force base 10 (so a zero-padded value like 08 is not read as octal) now
+   ## that the string is known all-digit and short; floor at 1 so the loop
+   ## always probes at least once.
+   max_ctr="$(( 10#${max_ctr} ))"
+   if [ "${max_ctr}" -lt 1 ]; then
+      max_ctr=30
+   fi
+
+   while [ "${delay_ctr}" -lt "${max_ctr}" ]; do
       ## Re-probe EVERY iteration (never trust a cached verdict): the socket can
       ## become connectable at any attempt. Silence the per-attempt WARNING the
       ## probe emits while it is not yet reachable.
@@ -48,7 +67,7 @@ try_wait_for_privleap_socket_ready() {
          return 0
       fi
       light_sleep 1
-      (( delay_ctr++ )) || true
+      delay_ctr="$(( delay_ctr + 1 ))"
    done
    ## Give up quietly: the consumer keeps its own privleap-unusable diagnosis.
    return 0

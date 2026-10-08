@@ -31,18 +31,25 @@ fi
 delay_ctr=0
 
 while (( delay_ctr < 120 )); do
-   if ! privleapd_active_state="$(timeout --kill-after=3 3 systemctl --no-pager --no-block show privleapd.service \
-      --property ActiveState 2>/dev/null)" ; then
+   if ! privleapd_state="$(timeout --kill-after=3 3 systemctl --no-pager --no-block show privleapd.service \
+      --property LoadState --property ActiveState 2>/dev/null)" ; then
       ## systemctl non-functional (e.g. build chroot / fakeroot). Match
       ## try-wait-for-tor-service-running: do not block, let the caller proceed.
       true "INFO: systemctl non-functional."
       exit 0
    fi
-   case "${privleapd_active_state}" in
-      'ActiveState=active')
+   case "${privleapd_state}" in
+      *'LoadState=not-found'* | *'LoadState=masked'* | *'LoadState=error'*)
+         ## Unit cannot run (not installed / masked): do not wait it out,
+         ## otherwise a disabled privleapd stalls the caller for the full loop.
          break
          ;;
-      'ActiveState=failed')
+   esac
+   case "${privleapd_state}" in
+      *'ActiveState=active'*)
+         break
+         ;;
+      *'ActiveState=failed'*)
          break
          ;;
       *)
