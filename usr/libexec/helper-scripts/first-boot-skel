@@ -10,6 +10,7 @@ set -o pipefail
 set -o errtrace
 shopt -s inherit_errexit
 shopt -s shift_verbose
+export LC_ALL=C
 
 cache_folder="/var/cache/anon-base-files"
 
@@ -56,21 +57,6 @@ for fso in ./* ; do
    ## Technically below for 'cp' it would also be possible to use '$fso' rather
    ## than '$fso_basename', but the latter produces a prettier xtrace.
    fso_basename="${fso##*/}"
-   if [ ".bashrc" = "${fso_basename}" ]; then
-      ## We do not need /home/user/.bashrc.
-      ## /home/user/.bashrc is handled below.
-      continue
-   fi
-   if [ ".bashrc.whonix" = "${fso_basename}" ]; then
-      ## We do not need /home/user/.bashrc.whonix.
-      ## /home/user/.bashrc is handled below.
-      continue
-   fi
-   if [ ".bashrc.whonix-orig" = "${fso_basename}" ]; then
-      ## We do not need /home/user/.bashrc.whonix-orig.
-      ## /home/user/.bashrc is handled below.
-      continue
-   fi
    if [ -d "${fso}" ]; then
       true "folder: yes"
       cp --verbose --no-clobber --archive --parents --recursive "${fso_basename}" "${home_dir}"
@@ -82,35 +68,5 @@ for fso in ./* ; do
       chown --changes "${user_name}:${user_name}" "${home_dir}/${fso_basename}"
    fi
 done
-
-if [ ! -f "${skel_folder}/.bashrc.whonix-orig" ]; then
-   touch "${done_file}"
-   exit 0
-fi
-if [ ! -f "${skel_folder}/.bashrc.whonix" ]; then
-   touch "${done_file}"
-   exit 0
-fi
-if [ ! -f "${skel_folder}/.bashrc" ]; then
-   touch "${done_file}"
-   exit 0
-fi
-
-if diff "${skel_folder}/.bashrc.whonix" "${home_dir}/.bashrc" >/dev/null ; then
-   ## no diff found
-   true "Already using Whonix ${skel_folder}/.bashrc.whonix. No need to copy ${skel_folder}/.bashrc.whonix."
-   touch "${done_file}"
-   exit 0
-fi
-
-if diff "${skel_folder}/.bashrc.whonix-orig" "${home_dir}/.bashrc" >/dev/null ; then
-   ## no diff found
-   true "Overwriting default ${home_dir}/.bashrc ( which matches ${skel_folder}/.bashrc.whonix-orig ) with ${skel_folder}/.bashrc.whonix."
-   cp --verbose --archive "${skel_folder}/.bashrc.whonix" "${home_dir}/.bashrc"
-   chown --changes "${user_name}:${user_name}" "${home_dir}/.bashrc"
-else
-   ## a diff was found
-   true "User customized ${home_dir}/.bashrc. Keeping it."
-fi
 
 touch "${done_file}"
