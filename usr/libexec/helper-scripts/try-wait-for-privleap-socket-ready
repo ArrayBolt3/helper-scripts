@@ -1,0 +1,83 @@
+#!/bin/bash -e
+
+## Copyright (C) 2026 - 2026 ENCRYPTED SUPPORT LLC <adrelanos@whonix.org>
+## See the file COPYING for copying conditions.
+
+## AI-Assisted
+
+## provides was_executed
+# shellcheck source=./check_runtime.bsh
+source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/check_runtime.bsh || true
+if ! declare -F was_executed >/dev/null; then
+   printf '%s\n' "$0: ERROR: cannot source check_runtime.bsh!" >&2
+   exit 1
+fi
+
+## Block until privleapd's per-user comm socket /run/privleapd/comm/<uid> is
+## actually connectable, or a bounded number of attempts elapses.
+##
+## Why a wait is needed: privleapd.service reaching ready does NOT imply this
+## socket exists. A non-root uid's socket is created out of band by
+## leapctl@<uid>.service (pulled in by the user systemd manager at login),
+## independently of privleapd.service, and only becomes connectable after
+## bind + listen. A consumer that runs leaprun right after login can race it and
+## misreport privleap -- and therefore Tor state -- as unavailable.
+##
+## Why connect, not existence: there is a bind-vs-listen window in which the
+## socket file already exists ([ -S ] passes) but connect() is refused. Reuse
+## leaprun_useable_test (the exact [ -S ] + socat connect probe the consumers
+## already trust) rather than reimplementing the probe, so the readiness test
+## and the failure diagnosis stay a single source of truth.
+##
+## Pure and strict-mode-free so a consumer can source this file and call the
+## function without inheriting strict-mode; it returns, never exits. It depends
+## on leaprun_useable_test (use_leaprun.sh), the use_leaprun global it sets, and
+## light_sleep (light_sleep.bsh) being provided by the sourcing consumer --
+## systemcheck and updatecheck already source both. main() provides them for the
+## standalone executed path.
+try_wait_for_privleap_socket_ready() {
+   local delay_ctr max_ctr
+   delay_ctr=0
+   max_ctr="${privleap_socket_wait_max_ctr:-30}"
+   while (( delay_ctr < max_ctr )); do
+      ## Re-probe EVERY iteration (never trust a cached verdict): the socket can
+      ## become connectable at any attempt. Silence the per-attempt WARNING the
+      ## probe emits while it is not yet reachable.
+      leaprun_useable_test 2>/dev/null || true
+      if [ "${use_leaprun:-no}" = "yes" ]; then
+         return 0
+      fi
+      light_sleep 1
+      (( delay_ctr++ )) || true
+   done
+   ## Give up quietly: the consumer keeps its own privleap-unusable diagnosis.
+   return 0
+}
+
+main() {
+   set -o errexit
+   set -o nounset
+   set -o pipefail
+   set -o errtrace
+   shopt -s inherit_errexit
+   shopt -s shift_verbose
+   export LC_ALL=C
+
+   ## provides leaprun_useable_test, use_leaprun
+   # shellcheck source=./use_leaprun.sh
+   source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/use_leaprun.sh
+   ## provides light_sleep
+   # shellcheck source=./light_sleep.bsh
+   source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/light_sleep.bsh
+
+   ## Daemon first (fast, race-free where systemctl works); the socket poll below
+   ## is the creator-agnostic authoritative readiness gate.
+   "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/try-wait-for-privleapd-service-running || true
+
+   try_wait_for_privleap_socket_ready
+}
+
+## Only auto-run when executed, not when sourced (unit tests source it).
+if was_executed "${BASH_SOURCE[0]}"; then
+   main "$@"
+fi

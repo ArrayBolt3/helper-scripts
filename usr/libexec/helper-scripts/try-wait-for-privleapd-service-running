@@ -1,0 +1,53 @@
+#!/bin/bash
+
+## Copyright (C) 2026 - 2026 ENCRYPTED SUPPORT LLC <adrelanos@whonix.org>
+## See the file COPYING for copying conditions.
+
+## AI-Assisted
+
+set -o errexit
+set -o nounset
+set -o pipefail
+set -o errtrace
+shopt -s inherit_errexit
+shopt -s shift_verbose
+export LC_ALL=C
+
+## No 'exit 1' by design. Blocks the caller until privleapd is either running OR
+## it can be determined that it will never start running. It is the caller's
+## responsibility to handle privleapd's absence gracefully (systemcheck falls
+## through to its own privleap-unusable diagnosis).
+##
+## privleapd.service readiness guarantees only the control socket and the
+## PERSISTENT comm sockets (root). A non-root uid's /run/privleapd/comm/<uid> is
+## created out of band by leapctl@<uid>.service, so this daemon-up wait does NOT
+## by itself imply that socket is connectable -- pair it with the socket poll in
+## try-wait-for-privleap-socket-ready.
+
+if [ -n "${FAKEROOTKEY:-}" ]; then
+   export SYSTEMCTL_FORCE_BUS=1
+fi
+
+delay_ctr=0
+
+while (( delay_ctr < 120 )); do
+   if ! privleapd_active_state="$(timeout --kill-after=3 3 systemctl --no-pager --no-block show privleapd.service \
+      --property ActiveState 2>/dev/null)" ; then
+      ## systemctl non-functional (e.g. build chroot / fakeroot). Match
+      ## try-wait-for-tor-service-running: do not block, let the caller proceed.
+      true "INFO: systemctl non-functional."
+      exit 0
+   fi
+   case "${privleapd_active_state}" in
+      'ActiveState=active')
+         break
+         ;;
+      'ActiveState=failed')
+         break
+         ;;
+      *)
+         sleep 1
+         (( delay_ctr++ )) || true
+         ;;
+   esac
+done
