@@ -97,9 +97,9 @@ if [ "${FLOCKER-}" != "${0}" ]; then
   ## Never reached due to 'exec' above.
 fi
 
-## If we get this far, we're in wrap mode. The above code will have re-executed
-## this script with the lock held, so now we just need to hand off to the
-## target command.
+## If we get this far and lockfile_wrap is set to 'yes', we're in wrap mode.
+## The above code will have re-executed this script with the lock held, so now
+## we just need to hand off to the target command.
 if [ "${lockfile_wrap}" = "yes" ]; then
   shift # Get rid of the lock key name
   if [ "${#}" -ge 1 ] && [ "${1}" = "--" ]; then
@@ -112,6 +112,9 @@ if [ "${lockfile_wrap}" = "yes" ]; then
   unset LOCK_NAME FLOCKER
   exec -- "${@}"
 fi
+
+## FLOCKER is set and lockfile_wrap is not set to 'yes', therefore we've
+## successfully locked already and can allow the sourcing script to run.
 
 true "${BASH_SOURCE[0]}: INFO: FLOCKER set to self: yes"
 
