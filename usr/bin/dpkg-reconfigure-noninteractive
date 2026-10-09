@@ -11,18 +11,16 @@ shopt -s inherit_errexit
 shopt -s shift_verbose
 export LC_ALL=C
 
-# shellcheck source=../../../helper-scripts/usr/libexec/helper-scripts/strings.bsh
-source /usr/libexec/helper-scripts/strings.bsh
+# shellcheck source=../libexec/helper-scripts/strings.bsh
+source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/strings.bsh
 
 default_if_empty POLICYRCD "/usr/share/helper-scripts/policy-rc.d"
 default_if_empty DEBIAN_FRONTEND "noninteractive"
 default_if_empty DEBIAN_PRIORITY "critical"
 default_if_empty DEBCONF_NOWARNINGS "yes"
-default_if_empty APT_LISTCHANGES_FRONTEND "text"
 default_if_empty NEEDRESTART_MODE "l"
+export POLICYRCD DEBIAN_FRONTEND DEBIAN_PRIORITY DEBCONF_NOWARNINGS NEEDRESTART_MODE
 
-export POLICYRCD DEBIAN_FRONTEND DEBIAN_PRIORITY DEBCONF_NOWARNINGS APT_LISTCHANGES_FRONTEND NEEDRESTART_MODE
-
-## Why we are not using the 'apt-get' option '--yes'?
-## See 'man/apt-get-noninteractive.8.ronn' or 'man apt-get-noninteractive'.
-apt-get -o Dpkg::Options::="--force-confask,confnew,confmiss" "$@"
+## dpkg-reconfigure re-applies the stored debconf answers; it takes no
+## dpkg conffile options, so unlike dpkg-noninteractive nothing is forced.
+dpkg-reconfigure "$@"
