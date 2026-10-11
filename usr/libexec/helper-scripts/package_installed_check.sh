@@ -39,18 +39,18 @@ pkg_installed() {
    error_state=$(printf '%s' "${dpkg_query_output}" | awk '{print $3}')
 
    if ! [ "${requested_action}" = 'install' ]; then
-      true "$0: INFO: package ${package_name} requested_action ${requested_action} is not 'install'."
+      true "$0: INFO: package '${package_name}' requested_action '${requested_action}' is not 'install'."
       return 1
    fi
    if ! [ "${status}" = 'ok' ]; then
-      true "$0: INFO: package ${package_name} requested_action ${status} is not 'ok'."
+      true "$0: INFO: package '${package_name}' status '${status}' is not 'ok'."
       return 1
    fi
    if ! [ "${error_state}" = 'installed' ]; then
-      true "$0: INFO: package ${package_name} requested_action ${error_state} is not 'installed'."
+      true "$0: INFO: package '${package_name}' error_state '${error_state}' is not 'installed'."
       return 1
    fi
 
-   true "$0: INFO: ${package_name} is installed, ok."
+   true "$0: INFO: '${package_name}' is installed, ok."
    return 0
 }
