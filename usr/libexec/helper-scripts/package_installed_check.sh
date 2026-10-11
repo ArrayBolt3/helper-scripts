@@ -16,11 +16,6 @@
 
 ## NOTE: code duplication: Function pkg_installed is duplicated elsewhere in derivative-maker source code.
 
-## Contract: '${Status}' is '<want> <error-flag> <status>'. Returns 0 only for
-## 'install ok installed', so these return 1:
-##  - status half-installed / unpacked / half-configured / config-files;
-##  - error flag reinstreq;
-##  - want 'hold' (held-but-installed), 'deinstall', 'purge'.
 pkg_installed() {
    ## 'local' does not break 'sh'.
    local package_name dpkg_query_output

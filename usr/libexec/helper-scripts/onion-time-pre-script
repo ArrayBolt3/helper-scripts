@@ -16,19 +16,36 @@ if ! declare -F was_executed >/dev/null; then
    exit 1
 fi
 
+if was_executed "${BASH_SOURCE[0]}"; then
+   set -o errexit
+   set -o nounset
+   set -o errtrace
+   set -o pipefail
+   shopt -s inherit_errexit
+   shopt -s shift_verbose
+   export LC_ALL=C
+
+   ## Prevents exit_handler from misbehaving if exit_code is inherited from the
+   ## caller.
+   exit_code=""
+
+   ## Traps have to be set here so that exit codes are correct in the event of
+   ## a source failure.
+   trap "error_handler" ERR
+   trap "exit_handler" EXIT
+fi
+
 output_cmd() {
    msg="$*"
    printf '%s\n' "__ ${msg}"
 }
 
-## Every deliberate exit assigns exit_code and calls 'exit', which never fires
-## ERR. So an ERR is always an unexpected failure: report it as the error code
-## 1, never pass a raw status through (2 would read as 'busy' to sdwdate).
 error_handler() {
    local raw_exit_code="$?"
    printf '%s\n' "\
 BASH_COMMAND: ${BASH_COMMAND}
 raw_exit_code: ${raw_exit_code}"
+   ## This script's exit code must be 1 to indicate an unexpected failure.
    exit_code=1
 }
 
@@ -49,28 +66,6 @@ exit_handler() {
    output_cmd "### END: ### Exiting with exit_code '${exit_code}' indicating '${meaning}'."
    exit "${exit_code}"
 }
-
-strict_mode_and_traps() {
-   ## An inherited exit_code would be taken as deliberate by exit_handler.
-   exit_code=""
-   set -o errexit
-   set -o nounset
-   set -o errtrace
-   set -o pipefail
-   shopt -s inherit_errexit
-   shopt -s shift_verbose
-   export LC_ALL=C
-
-   trap "error_handler" ERR
-   trap "exit_handler" EXIT
-}
-
-## Executed: before the sibling sources, so a broken sibling still exits
-## through exit_handler with the error code 1. Sourced (unit tests): functions
-## only.
-if was_executed "${BASH_SOURCE[0]}"; then
-   strict_mode_and_traps
-fi
 
 source "${HELPER_SCRIPTS_PATH:-}"/usr/libexec/helper-scripts/tor_enabled_check
 
@@ -566,12 +561,6 @@ te_pe_tb_check() {
    exit "${exit_code}"
 }
 
-main() {
-   strict_mode_and_traps
-   te_pe_tb_check "$@"
-}
-
-## Only auto-run when executed, not when sourced (unit tests source it).
 if was_executed "${BASH_SOURCE[0]}"; then
-   main "$@"
+   te_pe_tb_check "$@"
 fi
