@@ -20,11 +20,11 @@
 ##
 ## --from-overlay is DEVELOPER OPT-IN. The Calamares pre-unpackfs module invokes
 ## it on every install, but it is a no-op unless the environment variable
-## DEVOVERLAY is truthy (1/true/yes), so normal user installs are
-## unaffected. A developer exports it before launching the installer AND
-## preserves it across the privilege escalation (e.g. 'sudo -E calamares' or
-## 'pkexec env DEVOVERLAY=1 calamares'); a plain desktop-icon launch
-## would scrub it. --force bypasses the gate for a manual run.
+## DEVOVERLAY is truthy (1/true/yes), so normal user installs are unaffected. A
+## developer exports it before launching the installer AND preserves it across
+## the privilege escalation (e.g. 'sudo -E calamares' or
+## 'pkexec env DEVOVERLAY=1 calamares'); a plain desktop-icon launch would scrub
+## it. --force bypasses the gate for a manual run.
 ## Behaviour notes: --from-overlay captures ALL live-session upperdir state
 ## (e.g. /var/log, dpkg state, /etc/machine-id) -- acceptable for development --
 ## and cannot represent overlay whiteouts, so files DELETED live are not removed
@@ -60,8 +60,7 @@ Options:
   --output <path>          output squashfs. Default '${default_output}'.
   --overlay-of <dir>       with --from-overlay, the overlay mount to read.
                            Default '/'.
-  --force                  with --from-overlay, ignore the DEVOVERLAY
-                           opt-in gate.
+  --force                  with --from-overlay, ignore the DEVOVERLAY opt-in gate.
   --help                   show this help.
 EOF
 }
@@ -82,11 +81,25 @@ require_cmd() {
    done
 }
 
+## Decode mountinfo octal escapes so a path containing a space/tab/newline/
+## backslash compares and resolves correctly. Backslash LAST so a real backslash
+## (encoded \134) cannot spuriously form another escape.
+mountinfo_unescape() {
+   local value
+   value="$1"
+   value="${value//\\040/ }"
+   value="${value//\\011/$'\t'}"
+   value="${value//\\012/$'\n'}"
+   value="${value//\\134/\\}"
+   printf '%s' "${value}"
+}
+
 ## Resolve the upperdir of the overlay mounted at a given mountpoint, from
 ## /proc/self/mountinfo. The super options (after the ' - ' separator) carry
 ## 'upperdir='.
 overlay_upperdir_of() {
-   local target line pre post fstype opts opt upper mount_point
+   local target line pre post fstype opts upper mount_point opt_item
+   local -a opt_list
    target="$1"
    upper=""
    while IFS= read -r line ; do
@@ -94,22 +107,23 @@ overlay_upperdir_of() {
       post="${line#* - }"
       ## Field 5 of the pre-separator part is the mount point.
       read -r _ _ _ _ mount_point _ <<< "${pre}"
-      [ "${mount_point}" = "${target}" ] || continue
+      [ "$(mountinfo_unescape "${mount_point}")" = "${target}" ] || continue
       read -r fstype _ opts <<< "${post}"
       [ "${fstype}" = "overlay" ] || continue
-      for opt in ${opts//,/ } ; do
-         case "${opt}" in
+      ## Split options on comma via read (no glob/word-split exposure).
+      IFS=',' read -r -a opt_list <<< "${opts}"
+      for opt_item in "${opt_list[@]}" ; do
+         case "${opt_item}" in
             upperdir=*)
-               upper="${opt#upperdir=}"
+               upper="${opt_item#upperdir=}"
                ;;
          esac
       done
    done < /proc/self/mountinfo
-   printf '%s' "${upper}"
+   printf '%s' "$(mountinfo_unescape "${upper}")"
 }
 
-## --from-overlay is developer opt-in; enabled only when DEVOVERLAY
-## is truthy.
+## --from-overlay is developer opt-in; enabled only when DEVOVERLAY is truthy.
 overlay_pack_enabled() {
    local value
    value="${DEVOVERLAY:-}"
@@ -134,7 +148,9 @@ paths=()
 while [ "$#" -gt 0 ] ; do
    case "$1" in
       --from-dir)
-         from_dir="${2:-}"
+         [ "$#" -ge 2 ] || error "--from-dir requires a value"
+         case "${2}" in -*) error "--from-dir value must not start with '-'" ;; esac
+         from_dir="${2}"
          shift 2
          ;;
       --from-overlay)
@@ -142,7 +158,8 @@ while [ "$#" -gt 0 ] ; do
          shift
          ;;
       --overlay-of)
-         overlay_of="${2:-}"
+         [ "$#" -ge 2 ] || error "--overlay-of requires a value"
+         overlay_of="${2}"
          shift 2
          ;;
       --force)
@@ -150,7 +167,9 @@ while [ "$#" -gt 0 ] ; do
          shift
          ;;
       --output)
-         output_squashfs="${2:-}"
+         [ "$#" -ge 2 ] || error "--output requires a value"
+         case "${2}" in -*) error "--output value must not start with '-'" ;; esac
+         output_squashfs="${2}"
          shift 2
          ;;
       --help)
@@ -174,14 +193,22 @@ while [ "$#" -gt 0 ] ; do
    esac
 done
 
-require_cmd mksquashfs cp safe-rm mkdir
-
 ## Exactly one content source.
 source_count=0
 [ "${#paths[@]}" -gt 0 ] && source_count=$(( source_count + 1 ))
 [ -n "${from_dir}" ] && source_count=$(( source_count + 1 ))
 [ "${from_overlay}" = "true" ] && source_count=$(( source_count + 1 ))
 [ "${source_count}" -eq 1 ] || error "choose exactly one of: paths, --from-dir, --from-overlay (see --help)"
+
+## Opt-in gate FIRST, before requiring any tool: a normal install (DEVOVERLAY
+## unset) must be a guaranteed no-op that cannot abort the install even if an
+## optional tool (safe-rm, squashfs-tools) is absent.
+if [ "${from_overlay}" = "true" ] && [ "${force}" != "true" ] && ! overlay_pack_enabled ; then
+   printf '%s\n' "${me}: --from-overlay opt-in not set (export DEVOVERLAY=true); skipping." >&2
+   exit 0
+fi
+
+require_cmd mksquashfs cp safe-rm mkdir chmod realpath
 
 staging=""
 cleanup() {
@@ -199,14 +226,8 @@ trap cleanup EXIT
 trap on_signal INT TERM
 
 if [ "${from_overlay}" = "true" ] ; then
-   ## Developer opt-in: no-op unless DEVOVERLAY is set (or --force),
-   ## so a normal user's install is unaffected.
-   if [ "${force}" != "true" ] && ! overlay_pack_enabled ; then
-      printf '%s\n' "${me}: --from-overlay opt-in not set (export DEVOVERLAY=true); skipping." >&2
-      exit 0
-   fi
-   ## A non-overlay root is NOT an error: skip cleanly (exit 0) rather than
-   ## abort the install.
+   ## Opt-in already checked above. A non-overlay root is NOT an error: skip
+   ## cleanly (exit 0) rather than abort the install.
    pack_root="$(overlay_upperdir_of "${overlay_of}")"
    if [ -z "${pack_root}" ] || [ ! -d "${pack_root}" ] ; then
       printf '%s\n' "${me}: NOTE: '${overlay_of}' has no overlay upperdir; skipping (install unaffected)." >&2
@@ -218,29 +239,40 @@ elif [ -n "${from_dir}" ] ; then
 else
    staging="$(mktemp --directory)"
    local_path=""
+   canon_path=""
    for local_path in "${paths[@]}" ; do
-      if [ "${local_path}" = "/" ] ; then
-         error "refusing to pack '/'"
-      fi
       if [ "${local_path:0:1}" != "/" ] ; then
          error "path must be absolute: '${local_path}'"
       fi
-      [ -e "${local_path}" ] || error "path does not exist: '${local_path}'"
-      cp --archive --parents -- "${local_path}" "${staging}/"
+      ## Canonicalize lexically (no symlink following), so '..', '//' and '/.'
+      ## cannot smuggle '/' past the guard nor make cp --parents write outside
+      ## the staging dir.
+      canon_path="$(realpath --canonicalize-missing --no-symlinks -- "${local_path}")"
+      if [ "${canon_path}" = "/" ] ; then
+         error "refusing to pack '/'"
+      fi
+      ## Accept a dangling symlink (cp --archive preserves it); -e alone is
+      ## false for one.
+      if [ ! -e "${canon_path}" ] && [ ! -L "${canon_path}" ] ; then
+         error "path does not exist: '${canon_path}'"
+      fi
+      cp --archive --one-file-system --parents -- "${canon_path}" "${staging}/"
    done
    pack_root="${staging}"
 fi
 
-mkdir -p -- "$(dirname -- "${output_squashfs}")"
+out_dir="$(dirname -- "${output_squashfs}")"
+mkdir -p -- "${out_dir}"
+if [ -d "${output_squashfs}" ] ; then
+   error "output path is an existing directory: '${output_squashfs}'"
+fi
 safe-rm --force -- "${output_squashfs}"
 
 ## Overlays are small; xz + reproducible mirrors the main squashfs. mksquashfs
 ## honors SOURCE_DATE_EPOCH when exported.
-printf '%s\n' "${me}: packing overlay squashfs -> '${output_squashfs}'" >&2
 ## -one-file-system: never cross a mount boundary, so a special filesystem
 ## (proc/sys/dev) or any nested mount under the packed tree cannot be packed.
-## Not needed for an overlay upperdir (mounts never land there) but a cheap
-## safety net for all modes.
+printf '%s\n' "${me}: packing overlay squashfs -> '${output_squashfs}'" >&2
 if ! mksquashfs "${pack_root}" "${output_squashfs}" \
    -reproducible \
    -noappend \
@@ -256,5 +288,8 @@ then
    fi
    error "mksquashfs failed"
 fi
+
+## Restrict the image: it may contain files that were mode 0600 on disk.
+chmod 0600 -- "${output_squashfs}"
 
 printf '%s\n' "${me}: done: '${output_squashfs}'" >&2
