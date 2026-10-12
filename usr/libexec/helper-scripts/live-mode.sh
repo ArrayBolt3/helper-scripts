@@ -68,11 +68,20 @@ fi
 ## cannot discriminate. The real signal is that dmsquash-live makes /run/overlayfs a
 ## SYMLINK into the persistence device when it engages, and leaves it a plain tmpfs
 ## directory on the amnesic fallback. Overridable for tests.
-## Note: 'rd.live.overlay=' (with '=' right after 'overlay') matches only the
-## persistent entries, never the amnesic base flag 'rd.live.overlay.overlayfs=1'.
+##
+## Verified against the shipped trixie dracut (dracut-core 106, module 90overlayfs:
+## engaged -> 'ln -s' /run/overlayfs; no-overlay fallback -> 'mkdir' /run/overlayfs).
+## Re-verify on a dracut major bump. Scope: the ISO always boots overlayfs mode
+## (rd.live.overlay.overlayfs=1) with a DIRECTORY overlay; a device-mapper COW-image
+## overlay or the newer 'rd.overlay=' spelling are never emitted by our GRUB entries.
+##
+## Match a whole-token ' rd.live.overlay=' (space-boundary around the padded cmdline)
+## so a parameter that merely CONTAINS the string does not false-match, and the
+## amnesic base flag 'rd.live.overlay.overlayfs=1' (no '=' right after 'overlay') never
+## matches.
 live_status_persistence_requested='false'
-case "${kernel_cmdline}" in
-  *rd.live.overlay=*)
+case " ${kernel_cmdline} " in
+  *" rd.live.overlay="*)
     live_status_persistence_requested='true'
     ;;
 esac
