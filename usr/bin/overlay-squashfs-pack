@@ -275,27 +275,27 @@ safe-rm --force -- "${output_squashfs}"
 ## honors SOURCE_DATE_EPOCH when exported.
 ## -one-file-system: never cross a mount boundary, so a special filesystem
 ## (proc/sys/dev) or any nested mount under the packed tree cannot be packed.
-mksquashfs_opts=(
-   -reproducible
-   -noappend
-   -comp xz
-   -no-progress
-   -one-file-system
-)
-## --from-overlay ONLY: drop overlayfs whiteouts. A live deletion is recorded in
-## the upperdir as a char device 0,0; once the squashfs is rsynced onto the
-## target there is no overlay, so a whiteout cannot delete anything -- rsync
-## recreates it as a junk char node, and mknod of it fails on a restrictive
-## target (e.g. a FAT ESP), aborting the install. Matching by file TYPE (not a
-## path list) excludes a whiteout whose name contains ANY byte, newline included,
-## with no quoting hole. An overlay upperdir holds no device nodes worth shipping
-## to an install (real ones live under /dev, a separate mount). The other modes
-## pack user-curated content, so a deliberately staged device node is kept.
-if [ "${from_overlay}" = "true" ] ; then
-   mksquashfs_opts+=( -action 'exclude@type(c)' )
-fi
+## -action 'exclude@type(c)': never put a char device node in the image, in ANY
+## mode. This image is rsynced (as root, '-a' includes --devices) ONTO an
+## installed rootfs, where a char device node is never valid overlay content:
+##  - an overlayfs DELETION is a char device 0,0 (a whiteout). It cannot delete
+##    anything once the overlay is gone; rsync recreates it as a junk char node,
+##    mknod fails on a restrictive target (e.g. a FAT ESP) and ABORTS the install,
+##    and a whiteout named like a real file (etc/passwd) would overwrite it with
+##    an unreadable char 0,0 node.
+##  - real device nodes belong to the base image / devtmpfs, not an add-on layer.
+## Matching by TYPE (not a path list) is newline-safe -- a whiteout name may hold
+## any byte. ai-review reconciliation: this is why a device node staged via
+## --from-dir / explicit path is also dropped (not "user content silently lost" --
+## a filesystem-overlay-for-install carries no device nodes by construction).
 printf '%s\n' "${me}: packing overlay squashfs -> '${output_squashfs}'" >&2
-if ! mksquashfs "${pack_root}" "${output_squashfs}" "${mksquashfs_opts[@]}"
+if ! mksquashfs "${pack_root}" "${output_squashfs}" \
+   -reproducible \
+   -noappend \
+   -comp xz \
+   -no-progress \
+   -one-file-system \
+   -action 'exclude@type(c)'
 then
    ## Drop any partial image so an optional unpackfs entry skips it cleanly.
    safe-rm --force -- "${output_squashfs}"
