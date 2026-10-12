@@ -275,23 +275,27 @@ safe-rm --force -- "${output_squashfs}"
 ## honors SOURCE_DATE_EPOCH when exported.
 ## -one-file-system: never cross a mount boundary, so a special filesystem
 ## (proc/sys/dev) or any nested mount under the packed tree cannot be packed.
-## -action 'exclude@type(c)': drop overlayfs whiteouts. A live deletion is
-## recorded in the upperdir as a char device 0,0; once the squashfs is rsynced
-## onto the target there is no overlay, so a whiteout cannot delete anything --
-## rsync recreates it as a junk char node, and mknod of it fails on a restrictive
+mksquashfs_opts=(
+   -reproducible
+   -noappend
+   -comp xz
+   -no-progress
+   -one-file-system
+)
+## --from-overlay ONLY: drop overlayfs whiteouts. A live deletion is recorded in
+## the upperdir as a char device 0,0; once the squashfs is rsynced onto the
+## target there is no overlay, so a whiteout cannot delete anything -- rsync
+## recreates it as a junk char node, and mknod of it fails on a restrictive
 ## target (e.g. a FAT ESP), aborting the install. Matching by file TYPE (not a
 ## path list) excludes a whiteout whose name contains ANY byte, newline included,
-## with no quoting hole: an overlay upperdir holds no legitimate char devices
-## (real ones live under /dev, a separate mount), and a clean changeset tree in
-## the other modes has none either.
+## with no quoting hole. An overlay upperdir holds no device nodes worth shipping
+## to an install (real ones live under /dev, a separate mount). The other modes
+## pack user-curated content, so a deliberately staged device node is kept.
+if [ "${from_overlay}" = "true" ] ; then
+   mksquashfs_opts+=( -action 'exclude@type(c)' )
+fi
 printf '%s\n' "${me}: packing overlay squashfs -> '${output_squashfs}'" >&2
-if ! mksquashfs "${pack_root}" "${output_squashfs}" \
-   -reproducible \
-   -noappend \
-   -comp xz \
-   -no-progress \
-   -one-file-system \
-   -action 'exclude@type(c)'
+if ! mksquashfs "${pack_root}" "${output_squashfs}" "${mksquashfs_opts[@]}"
 then
    ## Drop any partial image so an optional unpackfs entry skips it cleanly.
    safe-rm --force -- "${output_squashfs}"
