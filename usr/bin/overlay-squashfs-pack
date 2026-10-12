@@ -19,12 +19,20 @@
 ##                     any file edited live is captured with no staging step.
 ##
 ## --from-overlay is DEVELOPER OPT-IN. The Calamares pre-unpackfs module invokes
-## it on every install, but it is a no-op unless the environment variable
-## DEVOVERLAY is truthy (1/true/yes), so normal user installs are unaffected. A
-## developer exports it before launching the installer AND preserves it across
-## the privilege escalation (e.g. 'sudo -E calamares' or
-## 'pkexec env DEVOVERLAY=1 calamares'); a plain desktop-icon launch would scrub
-## it. --force bypasses the gate for a manual run.
+## it on every install, but it is a no-op for normal users: it packs only when
+## one of these opt-in signals is present (any one suffices):
+##   1. kernel cmdline token 'devoverlay' (add it at the GRUB boot menu) -- most
+##      robust: survives the whole boot, nothing to preserve across privilege
+##      escalation or a desktop-icon launch.
+##   2. a flag file /etc/overlay-squashfs-pack.conf or
+##      /usr/local/etc/overlay-squashfs-pack.conf -- persistent across reboots;
+##      its presence opts in (an empty file is enough) unless it contains an
+##      explicit-false token (0/false/no/off).
+##   3. env var DEVOVERLAY truthy (1/true/yes) -- convenient, but the developer
+##      must preserve it across the privilege escalation ('sudo -E calamares',
+##      'pkexec env DEVOVERLAY=1 calamares'); a plain desktop-icon launch scrubs
+##      it.
+## --force bypasses the gate for a manual run.
 ## Behaviour notes: --from-overlay captures ALL live-session upperdir state
 ## (e.g. /var/log, dpkg state, /etc/machine-id) -- acceptable for development.
 ## Overlay whiteouts (char 0,0 nodes marking files deleted live) are EXCLUDED
@@ -57,7 +65,10 @@ Content source (choose one):
   <path> ...               absolute paths; staged preserving layout, then packed.
   --from-dir <dir>         pack this directory (a changeset root mirroring '/').
   --from-overlay           pack the live root overlayfs upperdir (no staging);
-                           developer opt-in via DEVOVERLAY (or --force).
+                           developer opt-in via the kernel cmdline token
+                           'devoverlay', a flag file (/etc or /usr/local/etc
+                           overlay-squashfs-pack.conf), the DEVOVERLAY env var,
+                           or --force.
 
 Options:
   --output <path>          output squashfs. Default '${default_output}'.
@@ -126,11 +137,11 @@ overlay_upperdir_of() {
    printf '%s' "$(mountinfo_unescape "${upper}")"
 }
 
-## --from-overlay is developer opt-in; enabled only when DEVOVERLAY is truthy.
-overlay_pack_enabled() {
+## True if a casefolded opt-in token is truthy (anything but the explicit-false
+## set). Empty is NOT truthy (an unset env var is not an opt-in).
+overlay_pack_truthy() {
    local value
-   value="${DEVOVERLAY:-}"
-   value="${value,,}"
+   value="${1,,}"
    case "${value}" in
       ""|0|false|no|off)
          return 1
@@ -139,6 +150,36 @@ overlay_pack_enabled() {
          return 0
          ;;
    esac
+}
+
+## --from-overlay is developer opt-in, enabled by ANY of these (most robust
+## first). Any single source enabling is enough; order is just lookup order.
+##  1. kernel cmdline token 'devoverlay' -- set once at GRUB, survives the whole
+##     boot with nothing to preserve across sudo/pkexec/a desktop-icon launch.
+##  2. a flag file in /etc or /usr/local/etc -- persistent, survives reboots; its
+##     mere presence opts in, unless it holds an explicit-false token.
+##  3. env var DEVOVERLAY -- convenient, but must be preserved across the
+##     privilege escalation ('sudo -E', 'pkexec env DEVOVERLAY=1 ...').
+overlay_pack_enabled() {
+   local cmdline_file flag_file content
+   cmdline_file="${OVERLAY_PACK_CMDLINE_FILE:-/proc/cmdline}"
+   if [ -r "${cmdline_file}" ] && grep --quiet --word-regexp -- devoverlay "${cmdline_file}" 2>/dev/null ; then
+      return 0
+   fi
+   for flag_file in /etc/overlay-squashfs-pack.conf /usr/local/etc/overlay-squashfs-pack.conf ; do
+      if [ -e "${flag_file}" ] ; then
+         content="$(cat -- "${flag_file}" 2>/dev/null)" || content=""
+         content="${content//[[:space:]]/}"
+         ## Present and not explicitly false -> opt in (empty file = presence).
+         if [ -z "${content}" ] || overlay_pack_truthy "${content}" ; then
+            return 0
+         fi
+      fi
+   done
+   if overlay_pack_truthy "${DEVOVERLAY:-}" ; then
+      return 0
+   fi
+   return 1
 }
 
 from_dir=""
@@ -207,7 +248,7 @@ source_count=0
 ## unset) must be a guaranteed no-op that cannot abort the install even if an
 ## optional tool (safe-rm, squashfs-tools) is absent.
 if [ "${from_overlay}" = "true" ] && [ "${force}" != "true" ] && ! overlay_pack_enabled ; then
-   printf '%s\n' "${me}: --from-overlay opt-in not set (export DEVOVERLAY=true); skipping." >&2
+   printf '%s\n' "${me}: --from-overlay opt-in not set (kernel cmdline 'devoverlay', a flag file, or DEVOVERLAY=true); skipping." >&2
    exit 0
 fi
 
