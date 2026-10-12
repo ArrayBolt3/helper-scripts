@@ -26,9 +26,12 @@
 ## 'pkexec env DEVOVERLAY=1 calamares'); a plain desktop-icon launch would scrub
 ## it. --force bypasses the gate for a manual run.
 ## Behaviour notes: --from-overlay captures ALL live-session upperdir state
-## (e.g. /var/log, dpkg state, /etc/machine-id) -- acceptable for development --
-## and cannot represent overlay whiteouts, so files DELETED live are not removed
-## from the install (whiteouts pack as char-dev nodes, not deletions).
+## (e.g. /var/log, dpkg state, /etc/machine-id) -- acceptable for development.
+## Overlay whiteouts (char 0,0 nodes marking files deleted live) are EXCLUDED
+## from the pack: they cannot effect a deletion via rsync anyway, they recreate
+## as junk char nodes in the install, and creating one fails on a restrictive
+## target filesystem (e.g. a FAT ESP), which can abort the install. So files
+## DELETED live are simply not removed from the install.
 
 set -o errexit
 set -o nounset
@@ -208,13 +211,17 @@ if [ "${from_overlay}" = "true" ] && [ "${force}" != "true" ] && ! overlay_pack_
    exit 0
 fi
 
-require_cmd mksquashfs cp safe-rm mkdir chmod realpath
+require_cmd mksquashfs cp safe-rm mkdir chmod realpath find stat
 
 staging=""
+whiteout_excludes=""
 cleanup() {
    local rc="${1:-$?}"
    if [ -n "${staging}" ] ; then
       safe-rm --recursive --force -- "${staging}" 2>/dev/null || true
+   fi
+   if [ -n "${whiteout_excludes}" ] ; then
+      safe-rm --force -- "${whiteout_excludes}" 2>/dev/null || true
    fi
    trap - EXIT
    exit "${rc}"
@@ -268,17 +275,37 @@ if [ -d "${output_squashfs}" ] ; then
 fi
 safe-rm --force -- "${output_squashfs}"
 
+## Overlayfs whiteouts (char device 0,0) mark files deleted in the live
+## session. Once the squashfs is rsynced onto the target there is no overlay, so
+## they cannot effect a deletion; rsync recreates them as junk char nodes, and
+## creating a device node fails on a restrictive target (e.g. a FAT ESP), which
+## can abort the install. Collect them so mksquashfs excludes them. Harmless in
+## the other modes: a clean changeset tree has no char 0,0 nodes.
+whiteout_excludes="$(mktemp)"
+wh_node=""
+while IFS= read -r -d '' wh_node ; do
+   [ "$(stat --format='%t %T' -- "${wh_node}" 2>/dev/null)" = "0 0" ] || continue
+   ## Path relative to the source root, NO leading '/'. mksquashfs -ef in its
+   ## default (non-wildcard) mode matches this LITERALLY and root-anchored, so a
+   ## filename containing a glob metacharacter cannot mis-match and a same-named
+   ## file at another depth is not swept. A leading '/' is instead read as a real
+   ## absolute path and silently ignored.
+   printf '%s\n' "${wh_node#"${pack_root%/}/"}" >> "${whiteout_excludes}"
+done < <(find "${pack_root}" -xdev -type c -print0)
+
 ## Overlays are small; xz + reproducible mirrors the main squashfs. mksquashfs
 ## honors SOURCE_DATE_EPOCH when exported.
 ## -one-file-system: never cross a mount boundary, so a special filesystem
 ## (proc/sys/dev) or any nested mount under the packed tree cannot be packed.
+## -ef: drop the overlay whiteout nodes collected above.
 printf '%s\n' "${me}: packing overlay squashfs -> '${output_squashfs}'" >&2
 if ! mksquashfs "${pack_root}" "${output_squashfs}" \
    -reproducible \
    -noappend \
    -comp xz \
    -no-progress \
-   -one-file-system
+   -one-file-system \
+   -ef "${whiteout_excludes}"
 then
    ## Drop any partial image so an optional unpackfs entry skips it cleanly.
    safe-rm --force -- "${output_squashfs}"
