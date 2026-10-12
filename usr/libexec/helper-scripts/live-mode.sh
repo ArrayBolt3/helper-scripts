@@ -57,6 +57,40 @@ if [ -z "${kernel_cmdline+x}" ]; then
   fi
 fi
 
+## Opt-in persistent live overlay (the 'Persistent' GRUB submenu boots
+## 'rd.live.overlay=LABEL=persistence:/live/overlay'). 'requested' means such an
+## entry was booted; 'active' means the overlay actually engaged on a real
+## persistence device, as opposed to dmsquash-live's SILENT amnesic RAM fallback
+## (no persistence disk, or the overlay/ovlwork dirs missing).
+##
+## The '/' overlay mount options are IDENTICAL in both cases
+## (upperdir=/run/overlayfs,workdir=/run/ovlwork,lowerdir=/run/rootfsbase), so they
+## cannot discriminate. The real signal is that dmsquash-live makes /run/overlayfs a
+## SYMLINK into the persistence device when it engages, and leaves it a plain tmpfs
+## directory on the amnesic fallback. Overridable for tests.
+## Note: 'rd.live.overlay=' (with '=' right after 'overlay') matches only the
+## persistent entries, never the amnesic base flag 'rd.live.overlay.overlayfs=1'.
+live_status_persistence_requested='false'
+case "${kernel_cmdline}" in
+  *rd.live.overlay=*)
+    live_status_persistence_requested='true'
+    ;;
+esac
+
+if [ -z "${run_overlayfs_is_symlink+x}" ]; then
+  if [ -h /run/overlayfs ]; then
+    run_overlayfs_is_symlink='true'
+  else
+    run_overlayfs_is_symlink='false'
+  fi
+fi
+
+live_status_persistence_active='false'
+if [ "${live_status_persistence_requested}" = 'true' ] \
+  && [ "${run_overlayfs_is_symlink}" = 'true' ]; then
+  live_status_persistence_active='true'
+fi
+
 if ! [ -v writable_fs_lists_str ]; then
   writable_fs_lists_str="$(/usr/libexec/helper-scripts/get_writable_fs_lists.sh)"
 fi
@@ -187,6 +221,8 @@ if [ "${live_mode_sourced}" = 'false' ]; then
     "live_status_word_pretty"
     "live_status_detected"
     "live_status_maybe_iso_live_message"
+    "live_status_persistence_requested"
+    "live_status_persistence_active"
   )
 
   ## Print out in format suitable for 'eval' and 'grep'.
