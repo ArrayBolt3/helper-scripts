@@ -24,14 +24,20 @@
 ##   <read_root> OPTIONAL disk path to READ component residency from (default: the file: URI's own
 ##               path). Lets a HOST-side caller that emits a GUEST mount URI (e.g. file:/mnt/shared/...)
 ##               still read the repo at its readable host path.
-##   <arch>      OPTIONAL binary arch for the residency probe (default amd64).
-##   Components: ONLY those whose Packages index is actually present AND non-empty. reprepro writes an
-##   EMPTY (0-byte) Packages for a configured-but-unpopulated component (e.g. a whonix repo with no
-##   contrib/non-free packages); apt on a file: source then HARD-FAILS fetching that index (and a
-##   vboxsf shared folder does not reliably serve a 0-byte file to a guest), so an empty component
-##   must be dropped. When the repo path is unreadable (residency undeterminable), fall back to 'main'
-##   -- always present in a derivative local repo -- never the over-broad set that breaks on an empty
-##   component.
+##   <arch>      OPTIONAL binary arch for the residency probe (default: this machine's
+##               `dpkg --print-architecture`, falling back to amd64 if dpkg is absent). A caller
+##               generating sources for a DIFFERENT target arch (e.g. a host emitting a guest's
+##               sources) MUST pass the target's arch -- the default is the LOCAL arch.
+##   Components: ONLY those whose native-arch Packages index (binary-<arch>/Packages) is present AND
+##   non-empty. reprepro writes an EMPTY (0-byte) Packages for a configured-but-unpopulated component
+##   (e.g. a whonix repo with no contrib/non-free packages); apt on a file: source then HARD-FAILS
+##   fetching that index (and a vboxsf shared folder does not reliably serve a 0-byte file to a
+##   guest), so an empty component must be dropped. reprepro folds arch:all packages INTO each
+##   binary-<arch> index (no binary-all tree), and apt fetches binary-<arch> for the configured arch,
+##   so binary-<arch> is the authoritative residency signal -- probing binary-all too would keep a
+##   component whose binary-<arch>/Packages is 0-byte and re-introduce the very hard-fail this drops.
+##   When the repo path is unreadable (residency undeterminable), fall back to 'main' -- always
+##   present in a derivative local repo -- never the over-broad set that breaks on an empty component.
 ## Emits one deb822 stanza on stdout (no leading blank line; a caller appending
 ## to a multi-stanza file adds its own separator).
 local_apt_repo_sources_stanza() {
@@ -39,11 +45,10 @@ local_apt_repo_sources_stanza() {
   local local_apt_repo_sources_stanza_read local_apt_repo_sources_stanza_arch
   local local_apt_repo_sources_stanza_dists local_apt_repo_sources_stanza_cdir
   local local_apt_repo_sources_stanza_comp local_apt_repo_sources_stanza_comps
-  local local_apt_repo_sources_stanza_pkgs
   local_apt_repo_sources_stanza_uri="${1:-}"
   local_apt_repo_sources_stanza_suite="${2:-}"
   local_apt_repo_sources_stanza_read="${3:-}"
-  local_apt_repo_sources_stanza_arch="${4:-amd64}"
+  local_apt_repo_sources_stanza_arch="${4:-$(dpkg --print-architecture 2>/dev/null || printf '%s' amd64)}"
 
   if [ -z "${local_apt_repo_sources_stanza_uri}" ] \
     || [ -z "${local_apt_repo_sources_stanza_suite}" ]; then
@@ -59,17 +64,14 @@ local_apt_repo_sources_stanza() {
   local_apt_repo_sources_stanza_comps=""
   for local_apt_repo_sources_stanza_cdir in "${local_apt_repo_sources_stanza_dists}"/*/; do
     [ -d "${local_apt_repo_sources_stanza_cdir}" ] || continue
-    ## resident = any of this component's binary-<arch>/binary-all Packages indices is NON-EMPTY.
-    for local_apt_repo_sources_stanza_pkgs in \
-      "${local_apt_repo_sources_stanza_cdir}binary-${local_apt_repo_sources_stanza_arch}/Packages" \
-      "${local_apt_repo_sources_stanza_cdir}binary-all/Packages"; do
-      if [ -s "${local_apt_repo_sources_stanza_pkgs}" ]; then
-        local_apt_repo_sources_stanza_comp="${local_apt_repo_sources_stanza_cdir%/}"
-        local_apt_repo_sources_stanza_comp="${local_apt_repo_sources_stanza_comp##*/}"
-        local_apt_repo_sources_stanza_comps="${local_apt_repo_sources_stanza_comps}${local_apt_repo_sources_stanza_comps:+ }${local_apt_repo_sources_stanza_comp}"
-        break
-      fi
-    done
+    ## resident = this component's native-arch Packages index is NON-EMPTY. Probe binary-<arch> ONLY:
+    ## apt fetches that for the configured arch and HARD-FAILS on a 0-byte/absent one, so it is the
+    ## authoritative signal (reprepro folds arch:all into it; there is no binary-all tree to consult).
+    if [ -s "${local_apt_repo_sources_stanza_cdir}binary-${local_apt_repo_sources_stanza_arch}/Packages" ]; then
+      local_apt_repo_sources_stanza_comp="${local_apt_repo_sources_stanza_cdir%/}"
+      local_apt_repo_sources_stanza_comp="${local_apt_repo_sources_stanza_comp##*/}"
+      local_apt_repo_sources_stanza_comps="${local_apt_repo_sources_stanza_comps}${local_apt_repo_sources_stanza_comps:+ }${local_apt_repo_sources_stanza_comp}"
+    fi
   done
   [ -n "${local_apt_repo_sources_stanza_comps}" ] || local_apt_repo_sources_stanza_comps="main"
 
