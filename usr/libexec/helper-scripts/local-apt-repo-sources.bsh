@@ -18,25 +18,65 @@
 ## to-end path for an untrusted multi-user host; on a single-operator build/dev
 ## box the build user IS the trust anchor.
 
-## local_apt_repo_sources_stanza <uri> <suite>
-##   <uri>   complete apt URI, e.g. file:/srv/.../kicksecure or file:/mnt/local-apt-repo/kicksecure
-##   <suite> reprepro codename, normally 'local'
+## local_apt_repo_sources_stanza <uri> <suite> [<read_root>] [<arch>]
+##   <uri>       complete apt URI, e.g. file:/srv/.../kicksecure or file:/mnt/local-apt-repo/kicksecure
+##   <suite>     reprepro codename, normally 'local'
+##   <read_root> OPTIONAL disk path to READ component residency from (default: the file: URI's own
+##               path). Lets a HOST-side caller that emits a GUEST mount URI (e.g. file:/mnt/shared/...)
+##               still read the repo at its readable host path.
+##   <arch>      OPTIONAL binary arch for the residency probe (default amd64).
+##   Components: ONLY those whose Packages index is actually present AND non-empty. reprepro writes an
+##   EMPTY (0-byte) Packages for a configured-but-unpopulated component (e.g. a whonix repo with no
+##   contrib/non-free packages); apt on a file: source then HARD-FAILS fetching that index (and a
+##   vboxsf shared folder does not reliably serve a 0-byte file to a guest), so an empty component
+##   must be dropped. When the repo path is unreadable (residency undeterminable), fall back to 'main'
+##   -- always present in a derivative local repo -- never the over-broad set that breaks on an empty
+##   component.
 ## Emits one deb822 stanza on stdout (no leading blank line; a caller appending
 ## to a multi-stanza file adds its own separator).
 local_apt_repo_sources_stanza() {
   local local_apt_repo_sources_stanza_uri local_apt_repo_sources_stanza_suite
+  local local_apt_repo_sources_stanza_read local_apt_repo_sources_stanza_arch
+  local local_apt_repo_sources_stanza_dists local_apt_repo_sources_stanza_cdir
+  local local_apt_repo_sources_stanza_comp local_apt_repo_sources_stanza_comps
+  local local_apt_repo_sources_stanza_pkgs
   local_apt_repo_sources_stanza_uri="${1:-}"
   local_apt_repo_sources_stanza_suite="${2:-}"
+  local_apt_repo_sources_stanza_read="${3:-}"
+  local_apt_repo_sources_stanza_arch="${4:-amd64}"
 
   if [ -z "${local_apt_repo_sources_stanza_uri}" ] \
     || [ -z "${local_apt_repo_sources_stanza_suite}" ]; then
     return 2
   fi
 
+  ## Default residency read path: the file: URI's own path (correct on-system, where the URI IS the
+  ## local path; a caller emitting a guest URI passes the host read_root explicitly).
+  if [ -z "${local_apt_repo_sources_stanza_read}" ]; then
+    local_apt_repo_sources_stanza_read="${local_apt_repo_sources_stanza_uri#file:}"
+  fi
+  local_apt_repo_sources_stanza_dists="${local_apt_repo_sources_stanza_read}/dists/${local_apt_repo_sources_stanza_suite}"
+  local_apt_repo_sources_stanza_comps=""
+  for local_apt_repo_sources_stanza_cdir in "${local_apt_repo_sources_stanza_dists}"/*/; do
+    [ -d "${local_apt_repo_sources_stanza_cdir}" ] || continue
+    ## resident = any of this component's binary-<arch>/binary-all Packages indices is NON-EMPTY.
+    for local_apt_repo_sources_stanza_pkgs in \
+      "${local_apt_repo_sources_stanza_cdir}binary-${local_apt_repo_sources_stanza_arch}/Packages" \
+      "${local_apt_repo_sources_stanza_cdir}binary-all/Packages"; do
+      if [ -s "${local_apt_repo_sources_stanza_pkgs}" ]; then
+        local_apt_repo_sources_stanza_comp="${local_apt_repo_sources_stanza_cdir%/}"
+        local_apt_repo_sources_stanza_comp="${local_apt_repo_sources_stanza_comp##*/}"
+        local_apt_repo_sources_stanza_comps="${local_apt_repo_sources_stanza_comps}${local_apt_repo_sources_stanza_comps:+ }${local_apt_repo_sources_stanza_comp}"
+        break
+      fi
+    done
+  done
+  [ -n "${local_apt_repo_sources_stanza_comps}" ] || local_apt_repo_sources_stanza_comps="main"
+
   printf '%s\n' "Types: deb
 URIs: ${local_apt_repo_sources_stanza_uri}
 Suites: ${local_apt_repo_sources_stanza_suite}
-Components: main contrib non-free
+Components: ${local_apt_repo_sources_stanza_comps}
 Enabled: yes
 Trusted: yes"
 }
