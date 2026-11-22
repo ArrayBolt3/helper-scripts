@@ -9,22 +9,9 @@ set -o errtrace
 set -o pipefail
 shopt -s inherit_errexit
 shopt -s shift_verbose
-orig_lc_all="${LC_ALL-UNSET}"
 
-enable_lc_all_c() {
-  [ "${orig_lc_all}" = 'C' ] && return;
-  export LC_ALL='C'
-}
-
-disable_lc_all_c() {
-   [ "${orig_lc_all}" = 'C' ] && return;
-
-   if [ "${orig_lc_all}" = 'UNSET' ]; then
-      unset LC_ALL
-   else
-      export LC_ALL="${orig_lc_all}"
-   fi
-}
+# shellcheck source=../libexec/helper-scripts/usr/libexec/helper-scripts/manage_lc_all_c.bsh
+source /usr/libexec/helper-scripts/manage_lc_all_c.bsh
 
 enable_lc_all_c
 

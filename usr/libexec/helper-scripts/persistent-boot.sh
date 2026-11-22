@@ -256,6 +256,50 @@ persistent_boot_prune() {
    done
 }
 
+## Atomically copy not-yet-synced kernel and initramfs files to the boot
+## partition.
+persistent_boot_install() {
+   local boot_dir src_dir copy_ok kernel_file kernel_version kernel_name \
+      initrd_name
+
+   boot_dir="${1}"
+   src_dir="${2}"
+   copy_ok='true'
+
+   if [ -z "${boot_dir}" ] || [ -z "${src_dir}" ]; then
+      return 1
+   fi
+   if [ -L "${boot_dir}" ]; then
+      printf '%s\n' "persistent-boot: refusing to install boot files into a symlinked boot dir." >&2
+      return 1
+   fi
+
+   for kernel_file in "${src_dir}"/vmlinuz-*; do
+      if [ ! -f "${kernel_file}" ]; then
+         continue
+      fi
+      kernel_version="${kernel_file##*/vmlinuz-}"
+      kernel_name="vmlinuz-${kernel_version}"
+      initrd_name="initrd.img-${kernel_version}"
+      if [ ! -f "${boot_dir}/${kernel_name}" ] || [ ! -f "${boot_dir}/${initrd_name}" ]; then
+        safe-rm --force -- "${boot_dir}/${kernel_name}" "${boot_dir}/${initrd_name}"
+        cp --dereference --remove-destination --no-target-directory -- "${src_dir}/${kernel_name}" "${boot_dir}/.${kernel_name}.new" || copy_ok='false'
+        cp --dereference --remove-destination --no-target-directory -- "${src_dir}/${initrd_name}" "${boot_dir}/.${initrd_name}.new" || copy_ok='false'
+        if [ "${copy_ok}" = 'true' ]; then
+          mv --force --no-target-directory -- "${boot_dir}/.${kernel_name}.new" "${boot_dir}/${kernel_name}" || copy_ok='false'
+          mv --force --no-target-directory -- "${boot_dir}/.${initrd_name}.new" "${boot_dir}/${initrd_name}" || copy_ok='false'
+        fi
+        safe-rm --force -- "${boot_dir}/.${kernel_name}.new" "${boot_dir}/.${initrd_name}.new" 2>/dev/null || true
+      fi
+
+      if [ "${copy_ok}" = 'false' ]; then
+        return 1
+      fi
+   done
+
+   return 0
+}
+
 ## Write persistent-overlay-aware GRUB configuration to
 ## ${boot_dir}/grub/grub.cfg.
 persistent_boot_write_grub_cfg() {
