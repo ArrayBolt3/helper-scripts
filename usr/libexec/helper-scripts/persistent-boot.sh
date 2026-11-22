@@ -141,7 +141,7 @@ persistent_boot_luks_uuid() {
 
 ## Find the partition with the specified GPT partition label. Outputs the name
 ## of the partition device if found, nothing if no partition device was found
-## multiple were found and no preferred device could be determined.
+## or multiple were found and no preferred device could be determined.
 persistent_boot_device() {
    local partlabel lsblk_name candidate_name lsblk_partlabel medium_dir \
       medium_src booted_disk_pkname candidate_disk_pkname
